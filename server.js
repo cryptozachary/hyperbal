@@ -1,16 +1,61 @@
 import express from 'express';
 import { config } from './config.js';
+import { openDb } from './db.js';
+import { isValidAddress } from './hyperliquid.js';
+import { assembleAccount } from './account.js';
 
-export function createApp() {
+export function createApp(db) {
   const app = express();
   app.use(express.json());
+
+  const opts = { apiUrl: config.hlApiUrl, snapshotMinIntervalMs: config.snapshotMinIntervalMs };
+
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: Date.now() }));
+
+  app.get('/api/config', (_req, res) => res.json({ defaultWallet: config.defaultWallet || null }));
+
+  app.get('/api/account/:address', async (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address. Expected 0x followed by 40 hex characters.' });
+    try {
+      const payload = await assembleAccount(address, db, opts);
+      res.json(payload);
+    } catch (err) {
+      res.status(502).json({ error: `Failed to load account from Hyperliquid: ${err.message}` });
+    }
+  });
+
+  app.get('/api/history/:address', (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    const since = Number(req.query.since) || 0;
+    res.json({ address, points: db.getHistory(address, since) });
+  });
+
+  app.get('/api/wallets', (_req, res) => res.json({ wallets: db.listWallets() }));
+
+  app.post('/api/wallets', (req, res) => {
+    const address = String(req.body?.address || '').toLowerCase();
+    const label = req.body?.label ? String(req.body.label).slice(0, 60) : null;
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    db.upsertWallet(address, label);
+    res.json({ wallets: db.listWallets() });
+  });
+
+  app.delete('/api/wallets/:address', (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    db.removeWallet(address);
+    res.json({ wallets: db.listWallets() });
+  });
+
   app.use(express.static('public'));
   return app;
 }
 
-// Start only when run directly (not when imported by tests).
 if (process.argv[1]?.endsWith('server.js')) {
-  const app = createApp();
-  app.listen(config.port, () => console.log(`Dashboard on http://localhost:${config.port}`));
+  const db = openDb(config.dbPath);
+  const app = createApp(db);
+  const server = app.listen(config.port, () => console.log(`Dashboard on http://localhost:${config.port}`));
+  // WS hub + stream attach here in Task 5.
+  globalThis.__hlServer = server;
 }
