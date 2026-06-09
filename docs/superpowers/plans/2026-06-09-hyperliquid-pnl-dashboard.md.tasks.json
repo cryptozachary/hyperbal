@@ -1,0 +1,61 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-09-hyperliquid-pnl-dashboard.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Project scaffold + config + health server",
+      "status": "pending",
+      "description": "**Goal:** Runnable Express server with /api/health, env config, project metadata.\n\n**Files:** package.json, .gitignore, .env.example, config.js, server.js, test/config.test.js\n\n**Verify:** npm install; npm test (config) PASS; npm start then GET /api/health -> {status:ok}\n\n```json:metadata\n{\"files\": [\"package.json\", \".gitignore\", \".env.example\", \"config.js\", \"server.js\", \"test/config.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"npm install completes\", \"npm start boots and /api/health returns ok\", \"config.js defaults, never throws\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: SQLite layer (db.js)",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** SQLite open + schema + wallet/snapshot/fill functions, throttled snapshot, cumulative realized.\n\n**Files:** db.js, test/db.test.js\n\n**Verify:** node --test test/db.test.js -> PASS\n\n```json:metadata\n{\"files\": [\"db.js\", \"test/db.test.js\"], \"verifyCommand\": \"node --test test/db.test.js\", \"acceptanceCriteria\": [\"schema idempotent + dir auto-created\", \"ingestFills dedupes by (address,tid); cumulativeRealized sums closed_pnl\", \"insertSnapshotThrottled skips within minIntervalMs\", \"wallet upsert/list/remove\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: HL REST fetchers + normalizers + validation (hyperliquid.js)",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** isValidAddress, fetchInfo, normalizeAccount (derive mark px/side/ROE/totals), normalizeFills, parseNum.\n\n**Files:** hyperliquid.js, test/hyperliquid.test.js\n\n**Verify:** node --test test/hyperliquid.test.js -> PASS\n\n```json:metadata\n{\"files\": [\"hyperliquid.js\", \"test/hyperliquid.test.js\"], \"verifyCommand\": \"node --test test/hyperliquid.test.js\", \"acceptanceCriteria\": [\"isValidAddress 0x+40hex\", \"normalizeAccount derives markPrice/side/ROE, tolerates missing -> null\", \"normalizeFills maps rows + recent sum\", \"fetchInfo throws clear error on non-ok\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: REST routes + account assembly (server.js, account.js)",
+      "status": "pending",
+      "blockedBy": [1, 2],
+      "description": "**Goal:** Wire DB+HL into REST routes; shared assembleAccount() used later by WS. Validation + error handling.\n\n**Files:** account.js, test/account.test.js, server.js (modify)\n\n**Verify:** node --test test/account.test.js PASS; manual curl returns populated JSON\n\n```json:metadata\n{\"files\": [\"account.js\", \"test/account.test.js\", \"server.js\"], \"verifyCommand\": \"node --test test/account.test.js\", \"acceptanceCriteria\": [\"/api/account validates, fetches CS+fills, ingests, snapshots, upserts, returns cumulative+recent realized\", \"invalid->400, HL fail->502\", \"/api/history + wallets CRUD work\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Upstream Hyperliquid WS client (hl-stream.js)",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Single upstream WS: webData2 (ref-counted per viewed wallet) + userFills (persistent per watched), ping, reconnect+resubscribe, emits account/fills.\n\n**Files:** hl-stream.js, test/hl-stream.test.js\n\n**Verify:** node --test test/hl-stream.test.js -> PASS\n\n```json:metadata\n{\"files\": [\"hl-stream.js\", \"test/hl-stream.test.js\"], \"verifyCommand\": \"node --test test/hl-stream.test.js\", \"acceptanceCriteria\": [\"watch/unwatch ref-count webData2\", \"track adds persistent userFills\", \"on (re)open resends all subs\", \"webData2->account event, userFills->fills event\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Browser WS hub (ws-server.js) + wire into server.js",
+      "status": "pending",
+      "blockedBy": [3, 4],
+      "description": "**Goal:** /ws hub: watch handling drives stream.track/watch, persists fills+snapshots from stream events, broadcasts account/realized/snapshot.\n\n**Files:** ws-server.js, server.js (modify startup)\n\n**Verify:** npm start; browser devtools shows /ws connect + account/snapshot frames after watching\n\n```json:metadata\n{\"files\": [\"ws-server.js\", \"server.js\"], \"verifyCommand\": \"npm start (manual browser verify)\", \"acceptanceCriteria\": [\"client watch -> stream.track+watch\", \"stream.account -> broadcast + throttled snapshot\", \"stream.fills -> ingest + broadcast realized\", \"disconnect -> unwatch\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Frontend (index.html, styles.css, app.js)",
+      "status": "pending",
+      "blockedBy": [3, 5],
+      "description": "**Goal:** Dark dashboard UI: wallet selector, status badge, 4 cards, 10-col positions table, canvas chart; REST initial + WS live + 30s polling fallback; loading/empty/error.\n\n**Files:** public/index.html, public/styles.css, public/app.js\n\n**Verify:** npm start; add real address -> cards/table/chart populate + live updates\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/styles.css\", \"public/app.js\"], \"verifyCommand\": \"npm start (manual browser verify)\", \"acceptanceCriteria\": [\"loads default+saved wallets, add/remove\", \"4 cards + 10-col table, green/red PnL\", \"canvas chart equity/PnL toggle, resize redraw\", \"WS live updates + status badge + 30s polling fallback\", \"loading/empty/error states\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: README + final review/run",
+      "status": "pending",
+      "blockedBy": [6],
+      "description": "**Goal:** Document per spec; final end-to-end review and clean run.\n\n**Files:** README.md\n\n**Verify:** npm install && npm test && npm start all succeed; live data renders\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"npm install && npm test && npm start\", \"acceptanceCriteria\": [\"README: what/install/run/configure/endpoints/limitations/security warning\", \"clean checkout install+test+start succeed\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-09T12:00:00Z"
+}
