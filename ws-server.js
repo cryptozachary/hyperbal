@@ -48,7 +48,8 @@ export function attachWsHub(httpServer, { db, stream, config }) {
         const address = String(msg.address || '').toLowerCase();
         if (!isValidAddress(address)) { client.send(JSON.stringify({ type: 'error', message: 'Invalid address' })); return; }
         const prev = watching.get(client);
-        if (prev && prev !== address) stream.unwatch(prev);
+        if (prev === address) return; // already watching this exact address — keep watch idempotent (no ref-count leak)
+        if (prev) stream.unwatch(prev);
         watching.set(client, address);
         stream.track(address);  // persistent userFills
         stream.watch(address);  // live webData2
