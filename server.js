@@ -3,6 +3,8 @@ import { config } from './config.js';
 import { openDb } from './db.js';
 import { isValidAddress } from './hyperliquid.js';
 import { assembleAccount } from './account.js';
+import { createStream } from './hl-stream.js';
+import { attachWsHub } from './ws-server.js';
 
 export function createApp(db) {
   const app = express();
@@ -56,6 +58,11 @@ if (process.argv[1]?.endsWith('server.js')) {
   const db = openDb(config.dbPath);
   const app = createApp(db);
   const server = app.listen(config.port, () => console.log(`Dashboard on http://localhost:${config.port}`));
-  // WS hub + stream attach here in Task 5.
-  globalThis.__hlServer = server;
+
+  const stream = createStream({ wsUrl: config.hlWsUrl });
+  stream.start();
+  // Re-track all previously-watched wallets so fills accumulate even before a browser connects.
+  for (const w of db.listWallets()) stream.track(w.address);
+
+  attachWsHub(server, { db, stream, config });
 }
