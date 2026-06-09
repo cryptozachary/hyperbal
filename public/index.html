@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hyperliquid PnL Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">⚡ Hyperliquid PnL</div>
+    <div class="controls">
+      <select id="walletSelect" aria-label="Saved wallets"></select>
+      <input id="walletInput" type="text" placeholder="0x… wallet address" autocomplete="off" spellcheck="false" />
+      <button id="addBtn">Add</button>
+      <button id="removeBtn" title="Remove selected">✕</button>
+      <button id="refreshBtn">↻ Refresh</button>
+      <span id="status" class="badge">—</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="cards" id="cards">
+      <div class="card"><div class="card-label">Account Equity</div><div class="card-value" id="equity">—</div></div>
+      <div class="card"><div class="card-label">Unrealized PnL</div><div class="card-value" id="uPnl">—</div></div>
+      <div class="card"><div class="card-label">Realized PnL (cumulative)</div><div class="card-value" id="rPnl">—</div><div class="card-sub" id="rPnlRecent"></div></div>
+      <div class="card"><div class="card-label">Open Positions</div><div class="card-value" id="posCount">—</div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Equity / PnL History</h2>
+        <div class="toggle">
+          <button class="active" data-series="equity">Equity</button>
+          <button data-series="pnl">PnL</button>
+        </div>
+      </div>
+      <canvas id="chart" height="220"></canvas>
+    </section>
+
+    <section class="panel">
+      <h2>Open Positions</h2>
+      <div id="tableWrap">
+        <table id="positions">
+          <thead><tr>
+            <th>Coin</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th>
+            <th>Liq.</th><th>Lev.</th><th>Margin</th><th>uPnL</th><th>ROE %</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden">No open positions.</div>
+      </div>
+    </section>
+
+    <div id="loading" class="overlay hidden">Loading…</div>
+    <div id="error" class="error hidden"></div>
+  </main>
+
+  <footer class="foot">Read-only. Never enter private keys or seed phrases.</footer>
+  <script src="app.js"></script>
+</body>
+</html>
