@@ -102,6 +102,13 @@ test('resolveAccountAddress falls back when userRole fails', async () => {
   assert.deepEqual(res, { address: AGENT, role: 'unknown', viaAgent: null });
 });
 
+test('resolveAccountAddress lowercases the resolved master', async () => {
+  const upperMaster = '0x' + 'A'.repeat(40);
+  const res = await resolveAccountAddress(AGENT, { fetchImpl: okJson({ role: 'agent', data: { user: upperMaster } }), apiUrl: 'http://x' });
+  assert.equal(res.address, '0x' + 'a'.repeat(40));
+  assert.equal(res.viaAgent, AGENT);
+});
+
 test('normalizeExtraAgents flags expired and drops malformed', () => {
   const now = 1000;
   const out = normalizeExtraAgents([

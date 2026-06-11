@@ -104,6 +104,7 @@ export function getUserFills(address, opts) {
 export function getUserRole(address, opts) {
   return fetchInfo({ type: 'userRole', user: address }, opts);
 }
+
 export function getExtraAgents(address, opts) {
   return fetchInfo({ type: 'extraAgents', user: address }, opts);
 }
@@ -112,6 +113,7 @@ export function getExtraAgents(address, opts) {
 // Only agent wallets are redirected (they hold no funds); user/vault/subAccount
 // are used as entered. Any failure falls back to the entered address.
 export async function resolveAccountAddress(address, opts) {
+  address = address.toLowerCase();
   let role;
   try {
     role = await getUserRole(address, opts);
@@ -132,6 +134,7 @@ export function normalizeExtraAgents(agents, now = Date.now()) {
   return arr
     .filter((a) => isValidAddress(a?.address))
     .map((a) => {
+      // validUntil is a Unix millisecond timestamp (compared against Date.now()).
       const validUntil = parseNum(a.validUntil);
       return {
         name: a.name ?? null,
