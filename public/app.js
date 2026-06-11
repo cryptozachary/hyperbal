@@ -68,7 +68,7 @@ async function loadAgents(address) {
     for (const a of agents) {
       const row = document.createElement('div');
       row.className = 'agent-row' + (a.expired ? ' expired' : '');
-      const validTxt = a.validUntil ? new Date(a.validUntil).toLocaleDateString() : '—';
+      const validTxt = a.validUntil != null ? new Date(a.validUntil).toLocaleDateString() : '—';
       const expiredTxt = a.expired ? ' <span class="agent-badge-expired">expired</span>' : '';
       row.innerHTML = `<span class="agent-name">${esc(a.name || 'Agent')}</span>
         <span class="agent-meta">${short(a.address)} · valid until ${validTxt}${expiredTxt}</span>`;
