@@ -3,7 +3,10 @@ import { getClearinghouseState, getUserFills, getPerpDexs, getDexCollateral, nor
 // Fetch live HL data across all perp dexs, persist fills + snapshot, return the
 // normalized dashboard payload. `opts`: { fetchImpl?, apiUrl, snapshotMinIntervalMs }
 export async function assembleAccount(address, db, opts) {
-  const [dexs, collateral] = await Promise.all([getPerpDexs(opts), getDexCollateral(opts)]);
+  // getDexCollateral reuses getPerpDexs (cached) internally, so fetch dexs first
+  // to avoid a duplicate perpDexs request on a cold cache.
+  const dexs = await getPerpDexs(opts);
+  const collateral = await getDexCollateral(opts);
   const fillsPromise = getUserFills(address, opts);
   fillsPromise.catch(() => {}); // avoid an unhandled rejection if a main-dex error throws before we await it
 
