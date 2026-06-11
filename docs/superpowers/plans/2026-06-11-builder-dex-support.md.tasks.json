@@ -1,0 +1,40 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-11-builder-dex-support.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Multi-dex primitives in hyperliquid.js",
+      "status": "pending",
+      "description": "**Goal:** Add dex discovery (cached), dex->collateral map (cached), dex-aware getClearinghouseState, and pure mergeAccounts, unit-tested.\n\n**Files:**\n- Modify: hyperliquid.js (extend getClearinghouseState; append getPerpDexs, getDexCollateral, mergeAccounts, _resetDexCaches)\n- Test: test/hyperliquid.test.js (append)\n\n**Acceptance Criteria:**\n- getClearinghouseState(address,opts,dex) adds dex only when provided (back-compat)\n- getPerpDexs returns [{name:null,fullName:'Main'},...builder] and caches within TTL\n- getDexCollateral Map(null->'USDC', builder->symbol via meta+spotMeta); null on failure\n- mergeAccounts sums null-safely, concatenates positions tagged {dex,collateral}, counts only real positions\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"hyperliquid.js\", \"test/hyperliquid.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"dex-aware getClearinghouseState\", \"getPerpDexs normalize+cache\", \"getDexCollateral mapping+degrade\", \"mergeAccounts sums/tags/null-safe\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Aggregate across dexs in assembleAccount",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** assembleAccount fetches every dex's clearinghouseState in parallel and returns one merged, persisted payload; main-dex failure throws, builder-dex failures skipped.\n\n**Files:**\n- Modify: account.js (imports; rewrite assembleAccount)\n- Test: test/account.test.js (replace)\n\n**Acceptance Criteria:**\n- merged positions from main+builder dexs; equity/uPnL summed; positions carry dex+collateral\n- failing builder dex skipped; failing main dex throws\n- snapshot stores aggregated equity; fills/realized unchanged\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"account.js\", \"test/account.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"aggregates main+builder\", \"skip failing builder dex\", \"throw on main failure\", \"aggregated snapshot\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: WS hub refresh nudge instead of main-dex paint",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** On main-dex webData2, broadcast {type:'refresh'} (not main-dex-only account/snapshot); move snapshot writing fully to the REST path.\n\n**Files:**\n- Modify: ws-server.js (stream.on('account') handler)\n\n**Acceptance Criteria:**\n- webData2 update -> broadcast {type:'refresh'} to watchers\n- no snapshot write / no account|snapshot broadcast from webData2 handler\n- fills->realized path unchanged\n\n**Verify:** npm test (no regressions; ws-server untested by convention) + coordinator manual smoke\n\n```json:metadata\n{\"files\": [\"ws-server.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"refresh nudge on webData2\", \"no snapshot/account broadcast there\", \"fills->realized unchanged\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Frontend unified multi-dex view",
+      "status": "pending",
+      "blockedBy": [1, 2],
+      "description": "**Goal:** Drive the view from REST (refetch on refresh nudge + always-on 30s poll + manual) and label each position with its collateral.\n\n**Files:**\n- Modify: public/app.js (state, ws onmessage, scheduleRefresh, polling always-on, renderAccount coin cell)\n- Modify: public/index.html (aggregation note)\n- Modify: public/styles.css (.dex-note)\n\n**Acceptance Criteria:**\n- {type:'refresh'} -> debounced refetch of /api/account + history\n- 30s poll runs continuously (builder-dex changes within <=30s)\n- positions show collateral (e.g. xyz:SP500 · USDC); missing collateral renders coin alone\n\n**Verify:** node --check public/app.js + coordinator manual smoke\n\n```json:metadata\n{\"files\": [\"public/app.js\", \"public/index.html\", \"public/styles.css\"], \"verifyCommand\": \"node --check public/app.js\", \"acceptanceCriteria\": [\"refresh->debounced refetch\", \"continuous 30s poll\", \"collateral label\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: README documentation",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Document multi-dex aggregation and the new endpoints.\n\n**Files:**\n- Modify: README.md (Features, Hyperliquid endpoints used, Limitations)\n\n**Acceptance Criteria:**\n- explains positions aggregated across main+builder dexs\n- lists perpDexs, dex-scoped clearinghouseState, meta/spotMeta\n- limitation: builder-dex <=30s freshness; non-HL perps (Bitget USDT) not shown\n\n**Verify:** git diff README.md\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"git diff README.md\", \"acceptanceCriteria\": [\"aggregation documented\", \"endpoints listed\", \"freshness + non-HL limitation\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-11T01:00:00Z"
+}
