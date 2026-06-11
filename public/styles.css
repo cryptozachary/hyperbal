@@ -58,3 +58,4 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
 .agent-row.expired{opacity:.55}
 .agent-badge-expired{color:var(--neg);margin-left:6px}
 .agents-empty{color:var(--muted);font-size:13px}
+.dex-note{color:var(--muted);font-size:12px;margin:0 0 14px}

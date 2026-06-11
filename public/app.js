@@ -5,7 +5,7 @@ const cls = (n) => n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const state = { address: null, ws: null, pollTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {} };
+const state = { address: null, ws: null, pollTimer: null, refreshTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {} };
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -34,7 +34,7 @@ function renderAccount(d) {
   for (const p of positions) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${p.coin ?? '—'}</td>
+      <td>${esc(p.coin ?? '—')}${p.collateral ? ` · ${esc(p.collateral)}` : ''}</td>
       <td class="${p.side === 'LONG' ? 'side-long' : 'side-short'}">${p.side ?? '—'}</td>
       <td>${fmtNum(p.size)}</td>
       <td>${fmtNum(p.entryPrice, 2)}</td>
@@ -109,29 +109,31 @@ async function loadHistory() {
   try { const { points } = await api(`/api/history/${state.address}`); state.history = points; drawChart(); } catch {}
 }
 
+function scheduleRefresh() {
+  if (state.refreshTimer) return;
+  state.refreshTimer = setTimeout(() => { state.refreshTimer = null; refresh(false); }, 1500);
+}
+
 // ---- WebSocket with fallback polling ----
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   state.ws = ws;
-  ws.onopen = () => { state.wsConnected = true; setStatus('Live', 'live'); stopPolling(); if (state.address) ws.send(JSON.stringify({ type: 'watch', address: state.address })); };
+  ws.onopen = () => { state.wsConnected = true; setStatus('Live', 'live'); if (state.address) ws.send(JSON.stringify({ type: 'watch', address: state.address })); };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === 'account') renderAccount(msg.data);
+    if (msg.type === 'refresh') scheduleRefresh();
     else if (msg.type === 'realized') { $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative); }
-    else if (msg.type === 'snapshot') { state.history.push(msg.point); drawChart(); }
     else if (msg.type === 'error') showError(msg.message);
   };
-  ws.onclose = () => { state.wsConnected = false; setStatus('Reconnecting…', 'down'); startPolling(); setTimeout(connectWs, 3000); };
+  ws.onclose = () => { state.wsConnected = false; setStatus('Reconnecting…', 'down'); setTimeout(connectWs, 3000); };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
 function startPolling() {
   if (state.pollTimer) return;
-  setStatus('Polling', 'poll');
   state.pollTimer = setInterval(() => refresh(false), 30000);
 }
-function stopPolling() { clearInterval(state.pollTimer); state.pollTimer = null; }
 
 async function refresh(showLoad = true) {
   if (!state.address) return;
@@ -206,6 +208,7 @@ async function init() {
   }
   await loadWallets(preferred);
   connectWs();
+  startPolling();
   const first = $('walletSelect').value || preferred;
   if (first) await selectAddress(first);
   else setStatus('Enter a wallet', 'poll');
