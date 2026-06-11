@@ -41,3 +41,31 @@ test('snapshot throttling', () => {
   assert.equal(allowed, true);
   assert.equal(db.getHistory('0xabc').length, 2);
 });
+
+test('wallets carry via_agent and preserve it on null upsert', () => {
+  const db = freshDb();
+  db.upsertWallet('0xmaster', 'main', '0xagent');
+  let rows = db.listWallets();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].via_agent, '0xagent');
+  // a later upsert without an agent (e.g. per-load refresh) must not wipe it
+  db.upsertWallet('0xmaster');
+  rows = db.listWallets();
+  assert.equal(rows[0].via_agent, '0xagent');
+});
+
+test('migration adds via_agent to a pre-existing wallets table', async () => {
+  const Database = (await import('better-sqlite3')).default;
+  const p = path.join(os.tmpdir(), `hl-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
+  // create an OLD-schema wallets table (no via_agent), then close
+  const old = new Database(p);
+  old.exec(`CREATE TABLE wallets (address TEXT PRIMARY KEY, label TEXT, added_at INTEGER NOT NULL, last_viewed_at INTEGER)`);
+  old.prepare(`INSERT INTO wallets (address, label, added_at, last_viewed_at) VALUES (?,?,?,?)`).run('0xold', 'legacy', 1, 1);
+  old.close();
+  // reopen via openDb -> migration should add the column and preserve the row
+  const db = openDb(p);
+  const rows = db.listWallets();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].address, '0xold');
+  assert.equal(rows[0].via_agent, null);
+});

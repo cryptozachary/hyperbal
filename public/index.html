@@ -20,6 +20,7 @@
   </header>
 
   <main>
+    <div id="walletBadge" class="wallet-badge hidden"></div>
     <section class="cards" id="cards">
       <div class="card"><div class="card-label">Account Equity</div><div class="card-value" id="equity">—</div></div>
       <div class="card"><div class="card-label">Unrealized PnL</div><div class="card-value" id="uPnl">—</div></div>
@@ -50,6 +51,11 @@
         </table>
         <div id="emptyState" class="empty hidden">No open positions.</div>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>Connected Agent Wallets</h2>
+      <div id="agentsPanel" class="agents"></div>
     </section>
 
     <div id="loading" class="overlay hidden">Loading…</div>

@@ -23,6 +23,10 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
 - **Equity / PnL history chart** — hand-drawn on a `<canvas>` (no chart library),
   backed by snapshots persisted in SQLite.
 - **Watched wallets** — add/remove wallets; they persist across restarts.
+- **Agent wallet recognition** — paste a Hyperliquid agent (API) wallet address and
+  it automatically resolves to the master account it signs for (agent wallets hold
+  no funds), with a badge showing the relationship. A **Connected Agent Wallets**
+  panel lists the agents authorized on the viewed account (name, address, expiry).
 - **Cumulative realized PnL** — accumulated by deduping observed trade fills, so it
   keeps growing beyond Hyperliquid's limited recent-fills window.
 - Clear loading, empty, and error states. Positive/negative PnL coloring.
@@ -98,6 +102,11 @@ All public, read-only:
   - `{ "type": "clearinghouseState", "user": "0x…" }` — equity, margin, and open
     positions (entry price, size, leverage, liquidation price, unrealized PnL, ROE).
   - `{ "type": "userFills", "user": "0x…" }` — recent trade fills (used for realized PnL).
+  - `{ "type": "userRole", "user": "0x…" }` — detects whether an address is an
+    agent wallet and, if so, returns its master account (used to resolve agent
+    addresses on entry).
+  - `{ "type": "extraAgents", "user": "0x…" }` — the agent/API wallets approved on
+    an account (name, address, valid-until), shown in the Connected Agent Wallets panel.
 - **WebSocket** `{HL_WS_URL}`
   - `webData2` — live account state (positions, equity, unrealized PnL).
   - `userFills` — live trade fills as they happen.
@@ -126,6 +135,10 @@ All public, read-only:
 - **Equity/PnL history snapshots accrue only for wallets you actively view** (and
   are throttled to one per `SNAPSHOT_MIN_INTERVAL_MS`). The chart fills in over
   time as you use the dashboard; it won't show history from before you ran it.
+- **Agent wallets resolve to the master account** and have no separate PnL — all
+  trading through an agent accrues to the master. The dashboard never approves,
+  revokes, or names agents (read-only); it only reads the `userRole`/`extraAgents`
+  relationships.
 - Single-user, no authentication — intended to run locally on your own machine.
 
 ## Security

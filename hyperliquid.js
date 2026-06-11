@@ -100,3 +100,47 @@ export function getClearinghouseState(address, opts) {
 export function getUserFills(address, opts) {
   return fetchInfo({ type: 'userFills', user: address }, opts);
 }
+
+export function getUserRole(address, opts) {
+  return fetchInfo({ type: 'userRole', user: address }, opts);
+}
+
+export function getExtraAgents(address, opts) {
+  return fetchInfo({ type: 'extraAgents', user: address }, opts);
+}
+
+// Resolve an entered address to the canonical fund-holding account.
+// Only agent wallets are redirected (they hold no funds); user/vault/subAccount
+// are used as entered. Any failure falls back to the entered address.
+export async function resolveAccountAddress(address, opts) {
+  address = address.toLowerCase();
+  let role;
+  try {
+    role = await getUserRole(address, opts);
+  } catch {
+    return { address, role: 'unknown', viaAgent: null };
+  }
+  const r = role?.role ?? 'unknown';
+  const master = role?.data?.user;
+  if (r === 'agent' && isValidAddress(master)) {
+    return { address: master.toLowerCase(), role: 'agent', viaAgent: address };
+  }
+  return { address, role: r, viaAgent: null };
+}
+
+// extraAgents -> [{ name, address, validUntil, expired }], dropping malformed rows.
+export function normalizeExtraAgents(agents, now = Date.now()) {
+  const arr = Array.isArray(agents) ? agents : [];
+  return arr
+    .filter((a) => isValidAddress(a?.address))
+    .map((a) => {
+      // validUntil is a Unix millisecond timestamp (compared against Date.now()).
+      const validUntil = parseNum(a.validUntil);
+      return {
+        name: a.name ?? null,
+        address: a.address.toLowerCase(),
+        validUntil,
+        expired: validUntil != null && validUntil < now,
+      };
+    });
+}

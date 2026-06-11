@@ -1,0 +1,39 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-11-agent-wallet-recognition.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Hyperliquid agent API layer",
+      "status": "completed",
+      "description": "**Goal:** Add userRole/extraAgents clients, an agent->master resolver, and an extraAgents normalizer to hyperliquid.js, unit-tested via injected fetchImpl.\n\n**Files:**\n- Modify: hyperliquid.js (append after getUserFills, ~line 102)\n- Test: test/hyperliquid.test.js (append)\n\n**Acceptance Criteria:**\n- getUserRole/getExtraAgents POST the correct info body\n- resolveAccountAddress returns master for role:agent, passes through other roles, falls back on malformed data or API failure\n- normalizeExtraAgents flags expired and drops invalid-address rows\n\n**Verify:** npm test -> all pass\n\n```json:metadata\n{\"files\": [\"hyperliquid.js\", \"test/hyperliquid.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"getUserRole/getExtraAgents request bodies correct\", \"resolveAccountAddress agent->master + passthrough + fallbacks\", \"normalizeExtraAgents expired flag + filtering\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: DB via_agent column + migration",
+      "status": "completed",
+      "description": "**Goal:** Persist the agent address an account was reached through, with an idempotent migration for existing databases.\n\n**Files:**\n- Modify: db.js (SCHEMA, migration after db.exec, upsertWallet stmt+method, listWallets stmt)\n- Test: test/db.test.js (append)\n\n**Acceptance Criteria:**\n- Fresh DBs include via_agent; pre-existing DBs gain it via ALTER TABLE without data loss\n- upsertWallet(address,label,viaAgent) stores via_agent and preserves on null upsert\n- listWallets() returns via_agent\n\n**Verify:** npm test -> all pass\n\n```json:metadata\n{\"files\": [\"db.js\", \"test/db.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"migration adds via_agent to old DB\", \"upsert stores+preserves via_agent\", \"listWallets returns via_agent\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Server routes + testability seam",
+      "status": "completed",
+      "blockedBy": [0, 1],
+      "description": "**Goal:** POST /api/wallets resolves entered address before saving and returns the resolution; add GET /api/agents/:address. Add a fetchImpl override seam to createApp.\n\n**Files:**\n- Modify: server.js (import, createApp signature + opts, POST /api/wallets, new GET route)\n- Test: test/server.test.js (create)\n\n**Acceptance Criteria:**\n- createApp(db,{fetchImpl}) threads fetchImpl into opts; createApp(db) unchanged in prod\n- POST /api/wallets with agent saves master + returns resolved\n- GET /api/agents returns normalized list; invalid->400; HL failure->502\n\n**Verify:** npm test -> all pass (server.test.js uses app.listen(0) + injected fetch)\n\n```json:metadata\n{\"files\": [\"server.js\", \"test/server.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"createApp overrides seam\", \"POST resolves agent->master + resolved payload\", \"GET /api/agents normalized + 400/502 handling\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Frontend badge + connected-agents panel",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** Select the resolved master after adding, show a badge when viewing a via-agent wallet, render a connected-agents panel for the selected account.\n\n**Files:**\n- Modify: public/index.html (#walletBadge in <main>, agents panel after Open Positions)\n- Modify: public/styles.css (badge + agent styles)\n- Modify: public/app.js (short/esc helpers, walletMeta, renderWalletBadge, loadAgents, loadWallets, selectAddress, addBtn)\n\n**Acceptance Criteria:**\n- Adding an agent address selects the resolved master and shows the badge\n- Via-agent wallet shows badge; normal wallet hides it\n- Agents panel lists name/short-address/valid-until/expired with empty + soft-error states\n- Agent names HTML-escaped\n\n**Verify:** Manual: npm start; add 0x2ba553...061036 -> panel lists an agent; add no-agent account -> empty state; badge shows only for via-agent wallets\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/styles.css\", \"public/app.js\"], \"verifyCommand\": \"manual: npm start then verify badge + agents panel\", \"acceptanceCriteria\": [\"add agent selects master + badge\", \"badge only for via-agent wallets\", \"agents panel empty/list/error states\", \"agent names escaped\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: README documentation",
+      "status": "completed",
+      "blockedBy": [3],
+      "description": "**Goal:** Document agent-wallet recognition (resolution + connected-agents panel) and the new endpoints.\n\n**Files:**\n- Modify: README.md (Features, Hyperliquid endpoints used, Limitations)\n\n**Acceptance Criteria:**\n- README explains pasting an agent/API wallet resolves to the master + describes the panel\n- userRole and extraAgents request types listed under endpoints\n\n**Verify:** git diff README.md shows the three additions; prose reads cleanly\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"git diff README.md\", \"acceptanceCriteria\": [\"resolution + panel documented\", \"userRole/extraAgents listed\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-11T00:40:00Z"
+}
