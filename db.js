@@ -6,6 +6,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS wallets (
   address TEXT PRIMARY KEY,
   label TEXT,
+  via_agent TEXT,
   added_at INTEGER NOT NULL,
   last_viewed_at INTEGER
 );
@@ -40,15 +41,22 @@ export function openDb(dbPath) {
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
 
+  // Migration: add wallets.via_agent to DBs created before agent-wallet support.
+  const walletCols = db.prepare(`PRAGMA table_info(wallets)`).all();
+  if (!walletCols.some((c) => c.name === 'via_agent')) {
+    db.exec(`ALTER TABLE wallets ADD COLUMN via_agent TEXT`);
+  }
+
   const stmts = {
     upsertWallet: db.prepare(`
-      INSERT INTO wallets (address, label, added_at, last_viewed_at)
-      VALUES (@address, @label, @now, @now)
+      INSERT INTO wallets (address, label, via_agent, added_at, last_viewed_at)
+      VALUES (@address, @label, @viaAgent, @now, @now)
       ON CONFLICT(address) DO UPDATE SET
         label = COALESCE(excluded.label, wallets.label),
+        via_agent = COALESCE(excluded.via_agent, wallets.via_agent),
         last_viewed_at = excluded.last_viewed_at
     `),
-    listWallets: db.prepare(`SELECT address, label, added_at, last_viewed_at FROM wallets ORDER BY last_viewed_at DESC NULLS LAST, added_at DESC`),
+    listWallets: db.prepare(`SELECT address, label, via_agent, added_at, last_viewed_at FROM wallets ORDER BY last_viewed_at DESC NULLS LAST, added_at DESC`),
     removeWallet: db.prepare(`DELETE FROM wallets WHERE address = ?`),
     insertFill: db.prepare(`
       INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, ts)
@@ -69,8 +77,8 @@ export function openDb(dbPath) {
 
   return {
     raw: db,
-    upsertWallet(address, label = null) {
-      stmts.upsertWallet.run({ address, label, now: Date.now() });
+    upsertWallet(address, label = null, viaAgent = null) {
+      stmts.upsertWallet.run({ address, label, viaAgent, now: Date.now() });
     },
     listWallets() { return stmts.listWallets.all(); },
     removeWallet(address) { stmts.removeWallet.run(address); },
