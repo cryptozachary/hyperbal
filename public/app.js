@@ -126,7 +126,8 @@ function connectWs() {
     else if (msg.type === 'realized') { $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative); }
     else if (msg.type === 'error') showError(msg.message);
   };
-  ws.onclose = () => { state.wsConnected = false; setStatus('Reconnecting…', 'down'); setTimeout(connectWs, 3000); };
+  // WS down, but the always-on 30s poll keeps data fresh — show "Polling" (not an alarming "down" state) while we reconnect in the background.
+  ws.onclose = () => { state.wsConnected = false; setStatus('Polling', 'poll'); setTimeout(connectWs, 3000); };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
