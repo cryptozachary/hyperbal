@@ -195,12 +195,18 @@ async function init() {
   });
   $('walletSelect').addEventListener('change', (e) => selectAddress(e.target.value));
 
-  // bootstrap: saved wallets + default
+  // bootstrap: saved wallets + default (resolve in case DEFAULT_WALLET is an agent address)
   const { defaultWallet } = await api('/api/config');
-  if (defaultWallet) { try { await api('/api/wallets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: defaultWallet }) }); } catch {} }
-  await loadWallets(defaultWallet || undefined);
+  let preferred = defaultWallet || undefined;
+  if (defaultWallet) {
+    try {
+      const { resolved } = await api('/api/wallets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: defaultWallet }) });
+      preferred = resolved?.address || defaultWallet;
+    } catch {}
+  }
+  await loadWallets(preferred);
   connectWs();
-  const first = $('walletSelect').value || defaultWallet;
+  const first = $('walletSelect').value || preferred;
   if (first) await selectAddress(first);
   else setStatus('Enter a wallet', 'poll');
 }

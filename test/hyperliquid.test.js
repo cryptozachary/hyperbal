@@ -123,3 +123,10 @@ test('normalizeExtraAgents flags expired and drops malformed', () => {
   assert.equal(out[2].name, 'NoExpiry');
   assert.equal(out[2].expired, false);
 });
+
+test('normalizeExtraAgents treats validUntil=0 as a real (expired) timestamp', () => {
+  const out = normalizeExtraAgents([{ name: 'Epoch', address: '0x' + 'd'.repeat(40), validUntil: 0 }], 1000);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].validUntil, 0);
+  assert.equal(out[0].expired, true);
+});

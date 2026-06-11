@@ -40,9 +40,13 @@ export function createApp(db, overrides = {}) {
     const entered = String(req.body?.address || '').toLowerCase();
     const label = req.body?.label ? String(req.body.label).slice(0, 60) : null;
     if (!isValidAddress(entered)) return res.status(400).json({ error: 'Invalid wallet address.' });
-    const resolved = await resolveAccountAddress(entered, opts);
-    db.upsertWallet(resolved.address, label, resolved.viaAgent);
-    res.json({ wallets: db.listWallets(), resolved: { entered, ...resolved } });
+    try {
+      const resolved = await resolveAccountAddress(entered, opts);
+      db.upsertWallet(resolved.address, label, resolved.viaAgent);
+      res.json({ wallets: db.listWallets(), resolved: { entered, ...resolved } });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to add wallet: ${err.message}` });
+    }
   });
 
   app.delete('/api/wallets/:address', (req, res) => {
