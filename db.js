@@ -48,6 +48,7 @@ export function openDb(dbPath) {
   }
 
   const stmts = {
+    // via_agent uses COALESCE: a null upsert (e.g. per-load refresh) preserves it; a non-null upsert overwrites it.
     upsertWallet: db.prepare(`
       INSERT INTO wallets (address, label, via_agent, added_at, last_viewed_at)
       VALUES (@address, @label, @viaAgent, @now, @now)

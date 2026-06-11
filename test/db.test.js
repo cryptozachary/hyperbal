@@ -56,8 +56,6 @@ test('wallets carry via_agent and preserve it on null upsert', () => {
 
 test('migration adds via_agent to a pre-existing wallets table', async () => {
   const Database = (await import('better-sqlite3')).default;
-  const os = await import('node:os');
-  const path = await import('node:path');
   const p = path.join(os.tmpdir(), `hl-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
   // create an OLD-schema wallets table (no via_agent), then close
   const old = new Database(p);
