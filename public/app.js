@@ -2,8 +2,10 @@ const $ = (id) => document.getElementById(id);
 const fmtUsd = (n) => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const fmtNum = (n, d = 4) => n == null ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
 const cls = (n) => n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '';
+const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const state = { address: null, ws: null, pollTimer: null, series: 'equity', history: [], wsConnected: false };
+const state = { address: null, ws: null, pollTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {} };
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -43,6 +45,37 @@ function renderAccount(d) {
       <td class="${cls(p.unrealizedPnl)}">${fmtUsd(p.unrealizedPnl)}</td>
       <td class="${cls(p.roe)}">${p.roe != null ? p.roe.toFixed(2) + '%' : '—'}</td>`;
     tbody.appendChild(tr);
+  }
+}
+
+function renderWalletBadge(address) {
+  const meta = state.walletMeta[address];
+  const el = $('walletBadge');
+  if (meta && meta.viaAgent) {
+    el.innerHTML = `Agent wallet <code>${short(meta.viaAgent)}</code> → showing master <code>${short(address)}</code>`;
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+async function loadAgents(address) {
+  const panel = $('agentsPanel');
+  panel.innerHTML = '';
+  try {
+    const { agents } = await api(`/api/agents/${address}`);
+    if (!agents.length) { panel.innerHTML = '<div class="agents-empty">No agent wallets connected.</div>'; return; }
+    for (const a of agents) {
+      const row = document.createElement('div');
+      row.className = 'agent-row' + (a.expired ? ' expired' : '');
+      const validTxt = a.validUntil ? new Date(a.validUntil).toLocaleDateString() : '—';
+      const expiredTxt = a.expired ? ' <span class="agent-badge-expired">expired</span>' : '';
+      row.innerHTML = `<span class="agent-name">${esc(a.name || 'Agent')}</span>
+        <span class="agent-meta">${short(a.address)} · valid until ${validTxt}${expiredTxt}</span>`;
+      panel.appendChild(row);
+    }
+  } catch {
+    panel.innerHTML = '<div class="agents-empty">Couldn\'t load connected agents.</div>';
   }
 }
 
@@ -114,8 +147,10 @@ async function refresh(showLoad = true) {
 // ---- Wallet management ----
 async function loadWallets(selected) {
   const { wallets } = await api('/api/wallets');
+  state.walletMeta = {};
   const sel = $('walletSelect'); sel.innerHTML = '';
   for (const w of wallets) {
+    state.walletMeta[w.address] = { label: w.label, viaAgent: w.via_agent };
     const o = document.createElement('option'); o.value = w.address;
     o.textContent = w.label ? `${w.label} (${w.address.slice(0, 6)}…)` : `${w.address.slice(0, 10)}…${w.address.slice(-4)}`;
     sel.appendChild(o);
@@ -125,7 +160,9 @@ async function loadWallets(selected) {
 
 async function selectAddress(address) {
   state.address = address; state.history = [];
+  renderWalletBadge(address);
   await refresh(true);
+  await loadAgents(address);
   if (state.wsConnected) state.ws.send(JSON.stringify({ type: 'watch', address }));
 }
 
@@ -143,8 +180,12 @@ async function init() {
   $('addBtn').addEventListener('click', async () => {
     const address = $('walletInput').value.trim().toLowerCase();
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) { showError('Invalid wallet address.'); return; }
-    try { await api('/api/wallets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address }) });
-      $('walletInput').value = ''; await loadWallets(address); await selectAddress(address);
+    try {
+      const { resolved } = await api('/api/wallets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address }) });
+      $('walletInput').value = '';
+      const canonical = resolved?.address || address;
+      await loadWallets(canonical);
+      await selectAddress(canonical);
     } catch (e) { showError(e.message); }
   });
   $('removeBtn').addEventListener('click', async () => {

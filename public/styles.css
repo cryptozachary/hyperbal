@@ -47,3 +47,14 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
 .hidden{display:none}
 .foot{text-align:center;color:var(--muted);padding:18px;font-size:12px;border-top:1px solid var(--line)}
 @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}input{min-width:160px}}
+.wallet-badge{margin:0 0 14px;padding:8px 12px;border-radius:10px;border:1px solid rgba(108,140,255,.4);
+  background:rgba(108,140,255,.08);color:var(--accent);font-size:12px}
+.wallet-badge code{color:var(--text)}
+.agents{display:flex;flex-direction:column;gap:8px}
+.agent-row{display:flex;justify-content:space-between;gap:12px;align-items:center;
+  padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+.agent-row .agent-name{font-weight:600}
+.agent-row .agent-meta{color:var(--muted);font-size:12px}
+.agent-row.expired{opacity:.55}
+.agent-badge-expired{color:var(--neg);margin-left:6px}
+.agents-empty{color:var(--muted);font-size:13px}
