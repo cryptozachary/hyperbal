@@ -40,9 +40,19 @@ test('POST /api/wallets resolves an agent wallet to its master', async () => {
     assert.equal(res.status, 200);
     assert.equal(json.resolved.entered, AGENT);
     assert.equal(json.resolved.address, MASTER);
+    assert.equal(json.resolved.role, 'agent');
     assert.equal(json.resolved.viaAgent, AGENT);
     assert.equal(json.wallets[0].address, MASTER);
     assert.equal(json.wallets[0].via_agent, AGENT);
+  });
+});
+
+test('POST /api/wallets rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/wallets`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: 'nope' }),
+    });
+    assert.equal(res.status, 400);
   });
 });
 
@@ -68,5 +78,14 @@ test('GET /api/agents rejects an invalid address', async () => {
   await withServer({}, async (base) => {
     const res = await fetch(`${base}/api/agents/nope`);
     assert.equal(res.status, 400);
+  });
+});
+
+test('GET /api/agents returns 502 when Hyperliquid fails', async () => {
+  const ACC = '0x' + '4'.repeat(40);
+  const fetchImpl = async () => ({ ok: false, status: 500, text: async () => 'boom' });
+  await withServer({ fetchImpl }, async (base) => {
+    const res = await fetch(`${base}/api/agents/${ACC}`);
+    assert.equal(res.status, 502);
   });
 });
