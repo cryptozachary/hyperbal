@@ -5,6 +5,7 @@ import { getClearinghouseState, getUserFills, getPerpDexs, getDexCollateral, nor
 export async function assembleAccount(address, db, opts) {
   const [dexs, collateral] = await Promise.all([getPerpDexs(opts), getDexCollateral(opts)]);
   const fillsPromise = getUserFills(address, opts);
+  fillsPromise.catch(() => {}); // avoid an unhandled rejection if a main-dex error throws before we await it
 
   // One clearinghouseState per dex, in parallel; builder-dex failures are skipped.
   const settled = await Promise.allSettled(dexs.map((d) => getClearinghouseState(address, opts, d.name)));
