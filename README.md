@@ -27,6 +27,10 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   it automatically resolves to the master account it signs for (agent wallets hold
   no funds), with a badge showing the relationship. A **Connected Agent Wallets**
   panel lists the agents authorized on the viewed account (name, address, expiry).
+- **All perp dexs in one view** — positions and equity are aggregated across
+  Hyperliquid's main perp dex **and** HIP-3 builder-deployed dexs (e.g. an
+  `xyz:SP500` short on the "XYZ" dex), each labeled with its collateral
+  (USDC / USDT0 / USDH / USDE).
 - **Cumulative realized PnL** — accumulated by deduping observed trade fills, so it
   keeps growing beyond Hyperliquid's limited recent-fills window.
 - Clear loading, empty, and error states. Positive/negative PnL coloring.
@@ -107,6 +111,11 @@ All public, read-only:
     addresses on entry).
   - `{ "type": "extraAgents", "user": "0x…" }` — the agent/API wallets approved on
     an account (name, address, valid-until), shown in the Connected Agent Wallets panel.
+  - `{ "type": "perpDexs" }` — the list of perp dexs (main + builder-deployed).
+  - `{ "type": "clearinghouseState", "user": "0x…", "dex": "<name>" }` — per-dex
+    account state (the main dex omits `dex`).
+  - `{ "type": "meta", "dex": "<name>" }` + `{ "type": "spotMeta" }` — resolve each
+    dex's collateral token to a symbol.
 - **WebSocket** `{HL_WS_URL}`
   - `webData2` — live account state (positions, equity, unrealized PnL).
   - `userFills` — live trade fills as they happen.
@@ -139,6 +148,12 @@ All public, read-only:
   trading through an agent accrues to the master. The dashboard never approves,
   revokes, or names agents (read-only); it only reads the `userRole`/`extraAgents`
   relationships.
+- **Builder-dex positions refresh within ~30s** (REST poll), while main-dex
+  changes update near-instantly. All dex equities are summed as ≈USD (each
+  collateral is a dollar-pegged stablecoin).
+- **Only Hyperliquid is shown.** Perps that aren't on Hyperliquid — e.g. the
+  USDT-margined pairs in some wallets' "Perps" tabs (Bitget's own engine) — are a
+  different venue and cannot appear here.
 - Single-user, no authentication — intended to run locally on your own machine.
 
 ## Security

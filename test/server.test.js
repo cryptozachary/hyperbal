@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server.js';
+import { _resetDexCaches } from '../hyperliquid.js';
 
 function fakeDb() {
   const wallets = [];
@@ -87,5 +88,34 @@ test('GET /api/agents returns 502 when Hyperliquid fails', async () => {
   await withServer({ fetchImpl }, async (base) => {
     const res = await fetch(`${base}/api/agents/${ACC}`);
     assert.equal(res.status, 502);
+  });
+});
+
+test('GET /api/account aggregates positions across main + builder dex', async () => {
+  _resetDexCaches();
+  const ACC = '0x' + '5'.repeat(40);
+  const POS = (coin, szi) => ({ position: { coin, szi, entryPx: '90', positionValue: '100', unrealizedPnl: '1', returnOnEquity: '0.1', liquidationPx: '50', leverage: { type: 'cross', value: 5 }, marginUsed: '10' } });
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'perpDexs') return { ok: true, json: async () => ([null, { name: 'xyz', fullName: 'XYZ' }]) };
+    if (b.type === 'spotMeta') return { ok: true, json: async () => ({ tokens: [{ index: 0, name: 'USDC' }] }) };
+    if (b.type === 'meta') return { ok: true, json: async () => ({ collateralToken: 0 }) };
+    if (b.type === 'clearinghouseState') {
+      const cs = b.dex === 'xyz'
+        ? { marginSummary: { accountValue: '583' }, assetPositions: [POS('xyz:SP500', '-0.753')] }
+        : { marginSummary: { accountValue: '500' }, assetPositions: [POS('BTC', '1')] };
+      return { ok: true, json: async () => cs };
+    }
+    if (b.type === 'userFills') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    const res = await fetch(`${base}/api/account/${ACC}`);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.equity, 1083);
+    const sp = json.positions.find((p) => p.coin === 'xyz:SP500');
+    assert.equal(sp.dex, 'xyz');
+    assert.equal(sp.collateral, 'USDC');
   });
 });

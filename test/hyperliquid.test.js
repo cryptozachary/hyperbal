@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isValidAddress, normalizeAccount, normalizeFills, parseNum, fetchInfo,
-  getUserRole, getExtraAgents, resolveAccountAddress, normalizeExtraAgents } from '../hyperliquid.js';
+  getUserRole, getExtraAgents, resolveAccountAddress, normalizeExtraAgents,
+  getPerpDexs, getDexCollateral, mergeAccounts, _resetDexCaches } from '../hyperliquid.js';
 
 test('isValidAddress', () => {
   assert.equal(isValidAddress('0x' + 'a'.repeat(40)), true);
@@ -129,4 +130,71 @@ test('normalizeExtraAgents treats validUntil=0 as a real (expired) timestamp', (
   assert.equal(out.length, 1);
   assert.equal(out[0].validUntil, 0);
   assert.equal(out[0].expired, true);
+});
+
+test('getPerpDexs normalizes (main first) and caches within TTL', async () => {
+  _resetDexCaches();
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return { ok: true, json: async () => ([null, { name: 'xyz', fullName: 'XYZ' }, { name: 'flx', fullName: 'Felix' }]) }; };
+  const a = await getPerpDexs({ fetchImpl, apiUrl: 'http://x' });
+  assert.deepEqual(a, [{ name: null, fullName: 'Main' }, { name: 'xyz', fullName: 'XYZ' }, { name: 'flx', fullName: 'Felix' }]);
+  await getPerpDexs({ fetchImpl, apiUrl: 'http://x' });
+  assert.equal(calls, 1); // second call served from cache
+});
+
+test('getPerpDexs degrades to main-only on failure and does NOT cache it', async () => {
+  _resetDexCaches();
+  let calls = 0, fail = true;
+  const fetchImpl = async () => {
+    calls++;
+    if (fail) return { ok: false, status: 500, text: async () => 'boom' };
+    return { ok: true, json: async () => ([null, { name: 'xyz', fullName: 'XYZ' }]) };
+  };
+  const a = await getPerpDexs({ fetchImpl, apiUrl: 'http://x' });
+  assert.deepEqual(a, [{ name: null, fullName: 'Main' }]);
+  // failure was not cached: a subsequent (now-succeeding) call refetches
+  fail = false;
+  const b = await getPerpDexs({ fetchImpl, apiUrl: 'http://x' });
+  assert.equal(calls, 2);
+  assert.deepEqual(b, [{ name: null, fullName: 'Main' }, { name: 'xyz', fullName: 'XYZ' }]);
+});
+
+test('getDexCollateral maps collateral tokens; main = USDC', async () => {
+  _resetDexCaches();
+  const fetchImpl = async (_u, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'perpDexs') return { ok: true, json: async () => ([null, { name: 'xyz', fullName: 'XYZ' }, { name: 'cash', fullName: 'dreamcash' }]) };
+    if (b.type === 'spotMeta') return { ok: true, json: async () => ({ tokens: [{ index: 0, name: 'USDC' }, { index: 268, name: 'USDT0' }] }) };
+    if (b.type === 'meta') return { ok: true, json: async () => ({ collateralToken: b.dex === 'cash' ? 268 : 0 }) };
+    return { ok: true, json: async () => ({}) };
+  };
+  const map = await getDexCollateral({ fetchImpl, apiUrl: 'http://x' });
+  assert.equal(map.get(null), 'USDC');
+  assert.equal(map.get('xyz'), 'USDC');
+  assert.equal(map.get('cash'), 'USDT0');
+});
+
+test('mergeAccounts sums and tags positions across dexs', () => {
+  const main = { equity: 500, marginUsed: 10, totalUnrealizedPnl: 10, openPositionsCount: 1, positions: [{ coin: 'BTC', size: 1 }] };
+  const xyz = { equity: 583, marginUsed: 583, totalUnrealizedPnl: -625, openPositionsCount: 1, positions: [{ coin: 'xyz:SP500', size: -0.753 }] };
+  const out = mergeAccounts([
+    { dex: null, collateral: 'USDC', account: main },
+    { dex: 'xyz', collateral: 'USDC', account: xyz },
+  ]);
+  assert.equal(out.equity, 1083);
+  assert.equal(out.marginUsed, 593);
+  assert.equal(out.totalUnrealizedPnl, -615);
+  assert.equal(out.openPositionsCount, 2);
+  assert.equal(out.positions[1].coin, 'xyz:SP500');
+  assert.equal(out.positions[1].dex, 'xyz');
+  assert.equal(out.positions[1].collateral, 'USDC');
+});
+
+test('mergeAccounts is null-safe and counts only real positions', () => {
+  const idle = { equity: 100, marginUsed: null, totalUnrealizedPnl: null, openPositionsCount: 0, positions: [] };
+  const empty = { equity: null, marginUsed: null, totalUnrealizedPnl: null, openPositionsCount: 0, positions: [] };
+  const out = mergeAccounts([{ dex: null, collateral: 'USDC', account: idle }, { dex: 'flx', collateral: 'USDH', account: empty }]);
+  assert.equal(out.equity, 100);
+  assert.equal(out.totalUnrealizedPnl, null);
+  assert.equal(out.openPositionsCount, 0);
 });

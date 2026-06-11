@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import { isValidAddress } from './hyperliquid.js';
 
 // Attaches a WS hub at /ws to an existing http.Server.
-export function attachWsHub(httpServer, { db, stream, config }) {
+export function attachWsHub(httpServer, { db, stream }) {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   const watching = new Map(); // ws client -> address
 
@@ -13,24 +13,11 @@ export function attachWsHub(httpServer, { db, stream, config }) {
     }
   }
 
-  // Persist + relay live account updates.
-  stream.on('account', ({ address, account }) => {
+  // A main-dex webData2 change can't carry builder-dex state, so nudge clients to
+  // re-fetch the aggregated account over REST (the single source of truth).
+  stream.on('account', ({ address }) => {
     if (!address) return;
-    const realizedPnlCumulative = db.cumulativeRealized(address);
-    const wrote = db.insertSnapshotThrottled(address, {
-      ts: Date.now(),
-      equity: account.equity,
-      unrealized_pnl: account.totalUnrealizedPnl,
-      realized_pnl_cum: realizedPnlCumulative,
-      open_positions: account.openPositionsCount,
-    }, config.snapshotMinIntervalMs);
-    broadcast(address, { type: 'account', data: { address, ...account, realizedPnlCumulative, asOf: Date.now() } });
-    if (wrote) {
-      broadcast(address, { type: 'snapshot', point: {
-        ts: Date.now(), equity: account.equity,
-        unrealized_pnl: account.totalUnrealizedPnl, realized_pnl_cum: realizedPnlCumulative,
-      } });
-    }
+    broadcast(address, { type: 'refresh' });
   });
 
   // Persist + relay live fills.
