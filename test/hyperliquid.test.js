@@ -142,11 +142,21 @@ test('getPerpDexs normalizes (main first) and caches within TTL', async () => {
   assert.equal(calls, 1); // second call served from cache
 });
 
-test('getPerpDexs degrades to main-only when perpDexs fails', async () => {
+test('getPerpDexs degrades to main-only on failure and does NOT cache it', async () => {
   _resetDexCaches();
-  const fetchImpl = async () => ({ ok: false, status: 500, text: async () => 'boom' });
+  let calls = 0, fail = true;
+  const fetchImpl = async () => {
+    calls++;
+    if (fail) return { ok: false, status: 500, text: async () => 'boom' };
+    return { ok: true, json: async () => ([null, { name: 'xyz', fullName: 'XYZ' }]) };
+  };
   const a = await getPerpDexs({ fetchImpl, apiUrl: 'http://x' });
   assert.deepEqual(a, [{ name: null, fullName: 'Main' }]);
+  // failure was not cached: a subsequent (now-succeeding) call refetches
+  fail = false;
+  const b = await getPerpDexs({ fetchImpl, apiUrl: 'http://x' });
+  assert.equal(calls, 2);
+  assert.deepEqual(b, [{ name: null, fullName: 'Main' }, { name: 'xyz', fullName: 'XYZ' }]);
 });
 
 test('getDexCollateral maps collateral tokens; main = USDC', async () => {

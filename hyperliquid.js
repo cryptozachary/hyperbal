@@ -94,6 +94,7 @@ export function normalizeFills(fills) {
 }
 
 // Convenience wrappers used by server/stream.
+// `dex`: null/omitted for the main perp dex, or a builder dex name string.
 export function getClearinghouseState(address, opts, dex) {
   const body = { type: 'clearinghouseState', user: address };
   if (dex) body.dex = dex;
@@ -185,7 +186,11 @@ export async function getDexCollateral(opts) {
         map.set(d.name, byIndex.get(m?.collateralToken) ?? null);
       } catch { map.set(d.name, null); }
     }));
-  } catch { /* degrade: only the main dex collateral is known */ }
+  } catch {
+    // Degraded (spotMeta/perpDexs failed): only main-dex collateral known. Don't
+    // cache, so the next call retries — collateral labels are cosmetic.
+    return map;
+  }
   _collCache = { ts: Date.now(), map };
   return map;
 }
