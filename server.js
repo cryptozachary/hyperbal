@@ -80,5 +80,5 @@ if (process.argv[1]?.endsWith('server.js')) {
   // Re-track all previously-watched wallets so fills accumulate even before a browser connects.
   for (const w of db.listWallets()) stream.track(w.address);
 
-  attachWsHub(server, { db, stream, config });
+  attachWsHub(server, { db, stream });
 }
