@@ -59,3 +59,9 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
 .agent-badge-expired{color:var(--neg);margin-left:6px}
 .agents-empty{color:var(--muted);font-size:13px}
 .dex-note{color:var(--muted);font-size:12px;margin:0 0 14px}
+.pager{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:12px}
+.pager button{padding:5px 12px;border-radius:8px;font-size:12px}
+.pager button:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+.pager-range{color:var(--muted);font-size:12px;min-width:120px;text-align:center}
+/* Direction reads as a label, not a number — left-align it like Time and Coin. */
+#fills th:nth-child(3),#fills td:nth-child(3){text-align:left}

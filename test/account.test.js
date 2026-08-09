@@ -33,6 +33,7 @@ function makeOpts({ dexs = [], cs = {}, failDex = null, failFills = false } = {}
 test('assembleAccount (main dex only) returns normalized payload and persists', async () => {
   _resetDexCaches();
   const db = freshDb();
+  db.upsertWallet(ADDR); // persistence is scoped to watched wallets; POST /api/wallets is the insertion path
   const opts = makeOpts({ cs: { main: { marginSummary: { accountValue: '500', totalMarginUsed: '10' }, assetPositions: [POS('BTC', '1', '10')] } } });
   const out = await assembleAccount(ADDR, db, opts);
   assert.equal(out.equity, 500);
@@ -85,4 +86,34 @@ test('assembleAccount rejects cleanly when main dex and userFills both fail (no 
   _resetDexCaches();
   const db = freshDb();
   await assert.rejects(() => assembleAccount(ADDR, db, makeOpts({ failDex: 'main', failFills: true })), /main dex/i);
+});
+
+test('assembleAccount does not resurrect a wallet that was deleted mid-flight', async () => {
+  _resetDexCaches();
+  const db = openDb(path.join(os.tmpdir(), `hl-resurrect-${Date.now()}-${Math.random().toString(16).slice(2)}.db`));
+  const A = '0x' + '9'.repeat(40);
+
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'perpDexs') return { ok: true, json: async () => ([null]) };
+    if (b.type === 'spotMeta') return { ok: true, json: async () => ({ tokens: [] }) };
+    if (b.type === 'clearinghouseState') return { ok: true, json: async () => ({ marginSummary: { accountValue: '500' }, assetPositions: [] }) };
+    if (b.type === 'userFills') return { ok: true, json: async () => ([{ tid: 1, coin: 'BTC', closedPnl: '5', fee: '0.1', px: '100', sz: '1', side: 'A', dir: 'Close Long', time: 10 }]) };
+    return { ok: true, json: async () => ({}) };
+  };
+  const opts = { fetchImpl, apiUrl: 'http://x', snapshotMinIntervalMs: 0 };
+
+  // watched: fills and snapshot persist, wallet row stays
+  db.upsertWallet(A, 'watched');
+  await assembleAccount(A, db, opts);
+  assert.equal(db.countFills(A), 1);
+  assert.equal(db.getHistory(A).length, 1);
+
+  // deleted, then a poll (or a second tab) hits /api/account again
+  db.deleteWallet(A);
+  await assembleAccount(A, db, opts);
+  assert.equal(db.listWallets().length, 0, 'wallet row must not come back');
+  assert.equal(db.countFills(A), 0, 'fills must not come back');
+  assert.equal(db.cumulativeRealized(A), 0, 'cumulative realized must not come back');
+  assert.equal(db.getHistory(A).length, 0, 'snapshots must not come back');
 });

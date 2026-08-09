@@ -13,7 +13,7 @@
       <select id="walletSelect" aria-label="Saved wallets"></select>
       <input id="walletInput" type="text" placeholder="0x… wallet address" autocomplete="off" spellcheck="false" />
       <button id="addBtn">Add</button>
-      <button id="removeBtn" title="Remove selected">✕</button>
+      <button id="removeBtn" title="Delete the selected wallet and its stored history">✕ Delete</button>
       <button id="refreshBtn">↻ Refresh</button>
       <span id="status" class="badge">—</span>
     </div>
@@ -33,7 +33,7 @@
     <section class="panel">
       <div class="panel-head">
         <h2>Equity / PnL History</h2>
-        <div class="toggle">
+        <div class="toggle" id="chartToggle">
           <button class="active" data-series="equity">Equity</button>
           <button data-series="pnl">PnL</button>
         </div>
@@ -52,6 +52,31 @@
           <tbody></tbody>
         </table>
         <div id="emptyState" class="empty hidden">No open positions.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Trade History</h2>
+        <div class="toggle">
+          <button id="fillsAllBtn" class="active">All fills</button>
+          <button id="fillsClosesBtn">Closes only</button>
+        </div>
+      </div>
+      <div id="fillsWrap">
+        <table id="fills">
+          <thead><tr>
+            <th>Time</th><th>Coin</th><th>Direction</th><th>Size</th>
+            <th>Price</th><th>Fee</th><th>Realized PnL</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="fillsEmpty" class="empty hidden">No trades recorded yet.</div>
+      </div>
+      <div class="pager">
+        <button id="fillsPrev">‹ Newer</button>
+        <span id="fillsRange" class="pager-range">—</span>
+        <button id="fillsNext">Older ›</button>
       </div>
     </section>
 

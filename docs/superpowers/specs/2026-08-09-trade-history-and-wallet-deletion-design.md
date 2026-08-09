@@ -203,3 +203,45 @@ public/styles.css   panel, toggle, pager styling
 README.md           document the panel and that deletion purges data
 test/               db, server, hl-stream, hyperliquid coverage above
 ```
+
+---
+
+## Addendum (post-implementation, 2026-08-09)
+
+Two defects surfaced in review that this design did not anticipate. Both are fixed
+on the branch; recorded here so the spec matches what was built.
+
+**1. The purge did not survive a subsequent account view.** `assembleAccount`
+called `db.upsertWallet` and `db.ingestFills` unconditionally, so any later
+`GET /api/account/:address` restored the wallet row, its fills, and its cumulative
+realized PnL. `stream.untrack` closed the live-fills door and left the REST door
+open. Reachable by the 30s poll racing the confirm dialog, by a `scheduleRefresh`
+timer armed before the delete, and — durably, with no race — by a second browser
+tab left open on that wallet, which resurrected it every 30 seconds indefinitely.
+
+Resolved by scoping persistence to wallets on the watch list: `db.hasWallet` gates
+ingest, snapshot, and touch in `account.js` (checked after every await, so a delete
+landing mid-request is observed), and `db.touchWallet` replaces the upsert in the
+view path — it updates `last_viewed_at` and never inserts, leaving
+`POST /api/wallets` as the sole insertion path. The hub applies the same gate before
+ingesting an in-flight `userFills` message and no longer re-arms `stream.track` for
+a wallet that is gone.
+
+This makes "nothing is persisted for an unsaved wallet" an invariant of the system,
+not an incidental property. It is the rule that makes deletion meaningful.
+
+**2. Live append could not stay consistent with the database.** The design had the
+client splice broadcast rows into the visible page and increment `total` locally.
+Two problems: broadcasts carried no address, so a fill for the previously-watched
+wallet could land in the newly-selected wallet's table (`selectAddress` sends its
+`watch` only after two round trips); and the dedupe set covered the visible 50 rows
+only, so the snapshot Hyperliquid replays on every upstream reconnect counted as
+new — inflating `total` past the real row count and prepending stale rows over the
+genuinely newest ones.
+
+Resolved by stamping every broadcast with its address (the client ignores anything
+not for the wallet on screen) and replacing the splice with a debounced
+authoritative re-read of page 1. User-visible behavior is unchanged — new fills
+still appear without a page refresh — but the database remains the only authority
+on count and order. `loadFills` additionally clamps back to the last real page when
+the offset falls off the end.

@@ -16,8 +16,27 @@ test('wallet upsert/list/remove', () => {
   let rows = db.listWallets();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].label, 'renamed');
-  db.removeWallet('0xabc');
+  db.deleteWallet('0xabc');
   assert.equal(db.listWallets().length, 0);
+});
+
+test('deleteWallet purges snapshots and fills for that address only', () => {
+  const db = freshDb();
+  for (const addr of ['0xaaa', '0xbbb']) {
+    db.upsertWallet(addr, 'w');
+    db.ingestFills(addr, [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', dir: 'Close Long', ts: 10 }]);
+    db.insertSnapshotThrottled(addr, { ts: 1000, equity: 1, unrealized_pnl: 0, realized_pnl_cum: 0, open_positions: 0 }, 0);
+  }
+  db.deleteWallet('0xaaa');
+
+  assert.equal(db.listWallets().length, 1);
+  assert.equal(db.listWallets()[0].address, '0xbbb');
+  assert.equal(db.countFills('0xaaa'), 0);
+  assert.equal(db.cumulativeRealized('0xaaa'), 0);
+  assert.equal(db.getHistory('0xaaa').length, 0);
+  // the surviving wallet is untouched
+  assert.equal(db.countFills('0xbbb'), 1);
+  assert.equal(db.getHistory('0xbbb').length, 1);
 });
 
 test('fills dedupe and cumulative realized', () => {
@@ -52,6 +71,70 @@ test('wallets carry via_agent and preserve it on null upsert', () => {
   db.upsertWallet('0xmaster');
   rows = db.listWallets();
   assert.equal(rows[0].via_agent, '0xagent');
+});
+
+test('migration adds dir to a pre-existing fills table', async () => {
+  const Database = (await import('better-sqlite3')).default;
+  const p = path.join(os.tmpdir(), `hl-fills-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
+  const old = new Database(p);
+  old.exec(`CREATE TABLE fills (address TEXT NOT NULL, tid INTEGER NOT NULL, coin TEXT,
+    closed_pnl REAL, fee REAL, px REAL, sz REAL, side TEXT, ts INTEGER, PRIMARY KEY (address, tid))`);
+  old.prepare(`INSERT INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, ts)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run('0xold', 1, 'BTC', 5, 0.1, 100, 1, 'B', 10);
+  old.close();
+  const db = openDb(p);
+  const rows = db.raw.prepare(`SELECT tid, dir FROM fills WHERE address = ?`).all('0xold');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].dir, null);
+});
+
+test('ingestFills stores dir and defaults it when the caller omits it', () => {
+  const db = freshDb();
+  db.ingestFills('0xabc', [
+    { tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', dir: 'Close Long', ts: 10 },
+    { tid: 2, coin: 'ETH', closed_pnl: 0, fee: 0.1, px: 50, sz: 2, side: 'B', ts: 20 },
+  ]);
+  const rows = db.raw.prepare(`SELECT tid, dir FROM fills WHERE address = ? ORDER BY tid`).all('0xabc');
+  assert.equal(rows[0].dir, 'Close Long');
+  assert.equal(rows[1].dir, null);
+});
+
+test('listFills paginates newest-first with stable ordering and closesOnly filter', () => {
+  const db = freshDb();
+  // tids 3 and 4 share a timestamp — ordering must still be total
+  db.ingestFills('0xabc', [
+    { tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', dir: 'Close Long', ts: 10 },
+    { tid: 2, coin: 'BTC', closed_pnl: 0, fee: 0.1, px: 100, sz: 1, side: 'B', dir: 'Open Long', ts: 20 },
+    { tid: 3, coin: 'ETH', closed_pnl: -2, fee: 0.1, px: 50, sz: 2, side: 'A', dir: 'Close Long', ts: 30 },
+    { tid: 4, coin: 'ETH', closed_pnl: 0, fee: 0.1, px: 50, sz: 2, side: 'B', dir: 'Open Long', ts: 30 },
+  ]);
+
+  const all = db.listFills('0xabc', { limit: 50, offset: 0 });
+  assert.deepEqual(all.map((r) => r.tid), [4, 3, 2, 1]);
+  assert.equal(db.countFills('0xabc'), 4);
+
+  // pagination covers every row exactly once
+  const p1 = db.listFills('0xabc', { limit: 2, offset: 0 });
+  const p2 = db.listFills('0xabc', { limit: 2, offset: 2 });
+  assert.deepEqual(p1.map((r) => r.tid), [4, 3]);
+  assert.deepEqual(p2.map((r) => r.tid), [2, 1]);
+
+  const closes = db.listFills('0xabc', { limit: 50, offset: 0, closesOnly: true });
+  assert.deepEqual(closes.map((r) => r.tid), [3, 1]);
+  assert.equal(db.countFills('0xabc', { closesOnly: true }), closes.length);
+
+  // rows carry the columns the UI renders
+  assert.equal(all[0].coin, 'ETH');
+  assert.equal(all[0].dir, 'Open Long');
+  assert.equal(all[0].fee, 0.1);
+});
+
+test('listFills is scoped to one address', () => {
+  const db = freshDb();
+  db.ingestFills('0xaaa', [{ tid: 1, coin: 'BTC', closed_pnl: 1, fee: 0, px: 1, sz: 1, side: 'A', dir: 'Close Long', ts: 1 }]);
+  db.ingestFills('0xbbb', [{ tid: 2, coin: 'ETH', closed_pnl: 2, fee: 0, px: 1, sz: 1, side: 'A', dir: 'Close Long', ts: 2 }]);
+  assert.equal(db.countFills('0xaaa'), 1);
+  assert.equal(db.listFills('0xaaa', { limit: 50, offset: 0 })[0].coin, 'BTC');
 });
 
 test('migration adds via_agent to a pre-existing wallets table', async () => {

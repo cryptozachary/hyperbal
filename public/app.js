@@ -5,7 +5,11 @@ const cls = (n) => n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const state = { address: null, ws: null, pollTimer: null, refreshTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {} };
+const state = {
+  address: null, ws: null, pollTimer: null, refreshTimer: null, fillsReloadTimer: null,
+  series: 'equity', history: [], wsConnected: false, walletMeta: {},
+  fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false },
+};
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -48,6 +52,66 @@ function renderAccount(d) {
   }
 }
 
+// Pre-migration rows have no dir; fall back to the raw HL side (B = bid/buy, A = ask/sell).
+const dirText = (f) => f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : '—');
+const fmtTime = (ts) => ts == null ? '—' : new Date(ts).toLocaleString();
+
+function fillRowHtml(f) {
+  return `
+    <td>${fmtTime(f.ts)}</td>
+    <td>${esc(f.coin ?? '—')}</td>
+    <td>${esc(dirText(f))}</td>
+    <td>${fmtNum(f.sz)}</td>
+    <td>${fmtNum(f.px, 2)}</td>
+    <td>${fmtUsd(f.fee)}</td>
+    <td class="${cls(f.closed_pnl)}">${f.closed_pnl ? fmtUsd(f.closed_pnl) : '—'}</td>`;
+}
+
+function renderFills() {
+  const f = state.fills;
+  const tbody = $('fills').querySelector('tbody');
+  tbody.innerHTML = '';
+  $('fillsEmpty').classList.toggle('hidden', f.rows.length > 0);
+  for (const row of f.rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = fillRowHtml(row);
+    tbody.appendChild(tr);
+  }
+  const first = f.total === 0 ? 0 : f.offset + 1;
+  const last = Math.min(f.offset + f.rows.length, f.total);
+  $('fillsRange').textContent = f.total === 0 ? '—' : `${first}–${last} of ${f.total}`;
+  $('fillsPrev').disabled = f.offset === 0;
+  $('fillsNext').disabled = f.offset + f.limit >= f.total;
+}
+
+async function loadFills(retried = false) {
+  if (!state.address) { state.fills.rows = []; state.fills.total = 0; renderFills(); return; }
+  const f = state.fills;
+  try {
+    const q = `limit=${f.limit}&offset=${f.offset}&closesOnly=${f.closesOnly}`;
+    const data = await api(`/api/fills/${state.address}?${q}`);
+    // The page can fall off the end of the data (a purge elsewhere, another tab,
+    // a server restart). Clamp back to the last real page instead of rendering an
+    // empty table under a "401–300 of 300" range.
+    if (!retried && !data.fills.length && data.total > 0 && f.offset > 0) {
+      f.offset = Math.max(0, (Math.ceil(data.total / f.limit) - 1) * f.limit);
+      return loadFills(true);
+    }
+    f.rows = data.fills;
+    f.total = data.total;
+    renderFills();
+  } catch (err) { showError(err.message); }
+}
+
+// New fills arrived. Re-read page 1 from the server rather than splicing them in:
+// the upstream userFills sub replays a snapshot on every reconnect, so a client-side
+// running total drifts and a blind prepend can push the genuinely-newest rows off
+// the page. The DB is the only thing that knows the real count and order.
+function scheduleFillsReload() {
+  if (state.fillsReloadTimer || state.fills.offset !== 0) return;
+  state.fillsReloadTimer = setTimeout(() => { state.fillsReloadTimer = null; loadFills(); }, 300);
+}
+
 function renderWalletBadge(address) {
   const meta = state.walletMeta[address];
   const el = $('walletBadge');
@@ -57,6 +121,28 @@ function renderWalletBadge(address) {
   } else {
     el.classList.add('hidden');
   }
+}
+
+// Clear every panel back to its empty state — used when the last wallet is deleted.
+function resetDashboard() {
+  state.address = null;
+  state.history = [];
+  state.fills = { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false };
+  clearTimeout(state.fillsReloadTimer); state.fillsReloadTimer = null;
+  for (const id of ['equity', 'uPnl', 'rPnl']) { $(id).textContent = '—'; $(id).className = 'card-value'; }
+  $('rPnlRecent').textContent = '';
+  $('posCount').textContent = '—';
+  $('positions').querySelector('tbody').innerHTML = '';
+  $('emptyState').classList.remove('hidden');
+  $('agentsPanel').innerHTML = '';
+  $('walletBadge').classList.add('hidden');
+  // Keep the filter buttons in sync with the closesOnly reset above.
+  $('fillsClosesBtn').classList.remove('active');
+  $('fillsAllBtn').classList.add('active');
+  renderFills();
+  drawChart();
+  clearError();
+  setStatus('Enter a wallet', 'poll');
 }
 
 async function loadAgents(address) {
@@ -122,8 +208,16 @@ function connectWs() {
   ws.onopen = () => { state.wsConnected = true; setStatus('Live', 'live'); if (state.address) ws.send(JSON.stringify({ type: 'watch', address: state.address })); };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    // The hub keeps routing the previously-watched address until our `watch` for the
+    // new one lands, so a broadcast can outrun a wallet switch. Ignore anything not
+    // for the wallet on screen — and anything at all once it's been deleted.
+    if (msg.address && msg.address !== state.address) return;
     if (msg.type === 'refresh') scheduleRefresh();
-    else if (msg.type === 'realized') { $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative); }
+    else if (msg.type === 'realized') {
+      if (!state.address) return; // wallet was just deleted; ignore in-flight fills for it
+      $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative);
+      scheduleFillsReload();
+    }
     else if (msg.type === 'error') showError(msg.message);
   };
   // WS down, but the always-on 30s poll keeps data fresh — show "Polling" (not an alarming "down" state) while we reconnect in the background.
@@ -143,6 +237,7 @@ async function refresh(showLoad = true) {
     const data = await api(`/api/account/${state.address}`);
     renderAccount(data);
     await loadHistory();
+    await loadFills();
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
 }
@@ -163,6 +258,7 @@ async function loadWallets(selected) {
 
 async function selectAddress(address) {
   state.address = address; state.history = [];
+  state.fills.offset = 0;
   renderWalletBadge(address);
   await refresh(true);
   await loadAgents(address);
@@ -172,11 +268,32 @@ async function selectAddress(address) {
 async function init() {
   setStatus('Connecting…');
   // chart toggle
-  document.querySelectorAll('.toggle button').forEach((b) =>
+  document.querySelectorAll('#chartToggle button').forEach((b) =>
     b.addEventListener('click', () => {
-      document.querySelectorAll('.toggle button').forEach((x) => x.classList.remove('active'));
+      document.querySelectorAll('#chartToggle button').forEach((x) => x.classList.remove('active'));
       b.classList.add('active'); state.series = b.dataset.series; drawChart();
     }));
+  // fills filter toggle
+  const setFillsFilter = (closesOnly, activeBtn) => {
+    document.querySelectorAll('#fillsAllBtn, #fillsClosesBtn').forEach((b) => b.classList.remove('active'));
+    activeBtn.classList.add('active');
+    state.fills.closesOnly = closesOnly;
+    state.fills.offset = 0;
+    loadFills();
+  };
+  $('fillsAllBtn').addEventListener('click', (e) => setFillsFilter(false, e.currentTarget));
+  $('fillsClosesBtn').addEventListener('click', (e) => setFillsFilter(true, e.currentTarget));
+  $('fillsPrev').addEventListener('click', () => {
+    state.fills.offset = Math.max(0, state.fills.offset - state.fills.limit);
+    loadFills();
+  });
+  $('fillsNext').addEventListener('click', () => {
+    if (state.fills.offset + state.fills.limit < state.fills.total) {
+      state.fills.offset += state.fills.limit;
+      loadFills();
+    }
+  });
+
   $('refreshBtn').addEventListener('click', () => refresh(true));
   window.addEventListener('resize', drawChart);
 
@@ -193,8 +310,18 @@ async function init() {
   });
   $('removeBtn').addEventListener('click', async () => {
     const a = $('walletSelect').value; if (!a) return;
-    await api(`/api/wallets/${a}`, { method: 'DELETE' }); await loadWallets();
-    const next = $('walletSelect').value; if (next) selectAddress(next);
+    const meta = state.walletMeta[a];
+    const name = meta?.label ? `${meta.label} (${short(a)})` : short(a);
+    // Purging is irreversible: realized PnL is cumulative since first observed and
+    // Hyperliquid only re-serves a limited recent window.
+    if (!confirm(`Delete ${name}?\n\nThis also erases its stored trade history and equity snapshots. This cannot be undone.`)) return;
+    try {
+      await api(`/api/wallets/${a}`, { method: 'DELETE' });
+      await loadWallets();
+      const next = $('walletSelect').value;
+      if (next) await selectAddress(next);
+      else resetDashboard();
+    } catch (e) { showError(e.message); }
   });
   $('walletSelect').addEventListener('change', (e) => selectAddress(e.target.value));
 

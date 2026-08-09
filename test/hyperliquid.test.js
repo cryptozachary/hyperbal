@@ -62,6 +62,15 @@ test('normalizeFills maps + recent sum', () => {
   assert.equal(recentRealized, 7);
 });
 
+test('normalizeFills carries dir and tolerates its absence', () => {
+  const { rows } = normalizeFills([
+    { tid: 1, coin: 'BTC', closedPnl: '5', fee: '0.1', px: '100', sz: '1', side: 'A', dir: 'Close Long', time: 10 },
+    { tid: 2, coin: 'ETH', closedPnl: '0', fee: '0.1', px: '50', sz: '2', side: 'B', time: 20 },
+  ]);
+  assert.equal(rows[0].dir, 'Close Long');
+  assert.equal(rows[1].dir, null);
+});
+
 test('fetchInfo throws on non-ok', async () => {
   const fakeFetch = async () => ({ ok: false, status: 500, text: async () => 'boom' });
   await assert.rejects(() => fetchInfo({ type: 'x' }, { fetchImpl: fakeFetch, apiUrl: 'http://x' }), /Hyperliquid API error 500/);

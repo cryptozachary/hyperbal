@@ -28,17 +28,24 @@ export async function assembleAccount(address, db, opts) {
   const account = mergeAccounts(perDex);
   const { rows, recentRealized } = normalizeFills(await fillsPromise);
 
-  db.ingestFills(address, rows);
+  // Only persist for wallets actually on the watch list. Checked here, after every
+  // await, because a delete can land while this request is in flight — and an
+  // unconditional upsert/ingest would resurrect the wallet we just purged. Adding a
+  // wallet goes through POST /api/wallets, which is the only insertion path.
+  const watched = db.hasWallet(address);
+  if (watched) db.ingestFills(address, rows);
   const realizedPnlCumulative = db.cumulativeRealized(address);
 
-  db.upsertWallet(address);
-  db.insertSnapshotThrottled(address, {
-    ts: Date.now(),
-    equity: account.equity,
-    unrealized_pnl: account.totalUnrealizedPnl,
-    realized_pnl_cum: realizedPnlCumulative,
-    open_positions: account.openPositionsCount,
-  }, opts.snapshotMinIntervalMs);
+  if (watched) {
+    db.touchWallet(address);
+    db.insertSnapshotThrottled(address, {
+      ts: Date.now(),
+      equity: account.equity,
+      unrealized_pnl: account.totalUnrealizedPnl,
+      realized_pnl_cum: realizedPnlCumulative,
+      open_positions: account.openPositionsCount,
+    }, opts.snapshotMinIntervalMs);
+  }
 
   return {
     address,

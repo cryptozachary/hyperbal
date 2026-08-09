@@ -17,15 +17,19 @@ export function attachWsHub(httpServer, { db, stream }) {
   // re-fetch the aggregated account over REST (the single source of truth).
   stream.on('account', ({ address }) => {
     if (!address) return;
-    broadcast(address, { type: 'refresh' });
+    broadcast(address, { type: 'refresh', address });
   });
 
-  // Persist + relay live fills.
+  // Persist + relay live fills. Rows ride along on this message so one upstream
+  // event produces exactly one downstream message.
   stream.on('fills', ({ address, rows, recentRealized }) => {
     if (!address) return;
+    // A userFills message can already be in flight when the wallet is deleted and
+    // untracked; ingesting it would re-create rows the purge just removed.
+    if (!db.hasWallet(address)) return;
     db.ingestFills(address, rows);
-    broadcast(address, { type: 'realized',
-      realizedPnlCumulative: db.cumulativeRealized(address), realizedPnlRecent: recentRealized });
+    broadcast(address, { type: 'realized', address,
+      realizedPnlCumulative: db.cumulativeRealized(address), realizedPnlRecent: recentRealized, fills: rows });
   });
 
   wss.on('connection', (client) => {
@@ -38,7 +42,9 @@ export function attachWsHub(httpServer, { db, stream }) {
         if (prev === address) return; // already watching this exact address — keep watch idempotent (no ref-count leak)
         if (prev) stream.unwatch(prev);
         watching.set(client, address);
-        stream.track(address);  // persistent userFills
+        // Only re-arm the persistent userFills sub for wallets still on the watch
+        // list — otherwise a stale tab reconnecting would undo a delete's untrack.
+        if (db.hasWallet(address)) stream.track(address);
         stream.watch(address);  // live webData2
       }
     });

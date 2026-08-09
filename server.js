@@ -6,11 +6,19 @@ import { assembleAccount } from './account.js';
 import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
 
+// Query params are untrusted strings (or arrays, for repeated params). Coerce to a
+// finite integer, falling back to `dflt` for anything that isn't one.
+function toSafeInt(v, dflt) {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) ? n : dflt;
+}
+
 export function createApp(db, overrides = {}) {
   const app = express();
   app.use(express.json());
 
-  const opts = { apiUrl: config.hlApiUrl, snapshotMinIntervalMs: config.snapshotMinIntervalMs, ...overrides };
+  const { stream = null, ...rest } = overrides;
+  const opts = { apiUrl: config.hlApiUrl, snapshotMinIntervalMs: config.snapshotMinIntervalMs, ...rest };
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: Date.now() }));
 
@@ -34,6 +42,24 @@ export function createApp(db, overrides = {}) {
     res.json({ address, points: db.getHistory(address, since) });
   });
 
+  app.get('/api/fills/:address', (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    // Clamp server-side so a hand-crafted request can't ask for the whole table.
+    // Must land on a safe integer: SQLite rejects fractional/Infinity/oversized
+    // LIMIT-OFFSET bindings, which would surface as an unhandled 500.
+    const limit = Math.min(200, Math.max(1, toSafeInt(req.query.limit, 50) || 50));
+    const offset = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, toSafeInt(req.query.offset, 0)));
+    const closesOnly = req.query.closesOnly === 'true';
+    res.json({
+      address,
+      fills: db.listFills(address, { limit, offset, closesOnly }),
+      total: db.countFills(address, { closesOnly }),
+      limit,
+      offset,
+    });
+  });
+
   app.get('/api/wallets', (_req, res) => res.json({ wallets: db.listWallets() }));
 
   app.post('/api/wallets', async (req, res) => {
@@ -51,7 +77,10 @@ export function createApp(db, overrides = {}) {
 
   app.delete('/api/wallets/:address', (req, res) => {
     const address = String(req.params.address || '').toLowerCase();
-    db.removeWallet(address);
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    db.deleteWallet(address);
+    // Without this the live userFills subscription re-inserts the fills we just purged.
+    stream?.untrack(address);
     res.json({ wallets: db.listWallets() });
   });
 
@@ -72,10 +101,10 @@ export function createApp(db, overrides = {}) {
 
 if (process.argv[1]?.endsWith('server.js')) {
   const db = openDb(config.dbPath);
-  const app = createApp(db);
+  const stream = createStream({ wsUrl: config.hlWsUrl });
+  const app = createApp(db, { stream });
   const server = app.listen(config.port, () => console.log(`Dashboard on http://localhost:${config.port}`));
 
-  const stream = createStream({ wsUrl: config.hlWsUrl });
   stream.start();
   // Re-track all previously-watched wallets so fills accumulate even before a browser connects.
   for (const w of db.listWallets()) stream.track(w.address);
