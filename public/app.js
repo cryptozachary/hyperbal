@@ -5,7 +5,10 @@ const cls = (n) => n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const state = { address: null, ws: null, pollTimer: null, refreshTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {} };
+const state = {
+  address: null, ws: null, pollTimer: null, refreshTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {},
+  fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false, tids: new Set() },
+};
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -46,6 +49,51 @@ function renderAccount(d) {
       <td class="${cls(p.roe)}">${p.roe != null ? p.roe.toFixed(2) + '%' : '—'}</td>`;
     tbody.appendChild(tr);
   }
+}
+
+// Pre-migration rows have no dir; fall back to the raw HL side (B = bid/buy, A = ask/sell).
+const dirText = (f) => f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : '—');
+const fmtTime = (ts) => ts == null ? '—' : new Date(ts).toLocaleString();
+
+function fillRowHtml(f) {
+  return `
+    <td>${fmtTime(f.ts)}</td>
+    <td>${esc(f.coin ?? '—')}</td>
+    <td>${esc(dirText(f))}</td>
+    <td>${fmtNum(f.sz)}</td>
+    <td>${fmtNum(f.px, 2)}</td>
+    <td>${fmtUsd(f.fee)}</td>
+    <td class="${cls(f.closed_pnl)}">${f.closed_pnl ? fmtUsd(f.closed_pnl) : '—'}</td>`;
+}
+
+function renderFills() {
+  const f = state.fills;
+  const tbody = $('fills').querySelector('tbody');
+  tbody.innerHTML = '';
+  $('fillsEmpty').classList.toggle('hidden', f.rows.length > 0);
+  for (const row of f.rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = fillRowHtml(row);
+    tbody.appendChild(tr);
+  }
+  const first = f.total === 0 ? 0 : f.offset + 1;
+  const last = Math.min(f.offset + f.rows.length, f.total);
+  $('fillsRange').textContent = f.total === 0 ? '—' : `${first}–${last} of ${f.total}`;
+  $('fillsPrev').disabled = f.offset === 0;
+  $('fillsNext').disabled = f.offset + f.limit >= f.total;
+}
+
+async function loadFills() {
+  if (!state.address) { state.fills.rows = []; state.fills.total = 0; renderFills(); return; }
+  const f = state.fills;
+  try {
+    const q = `limit=${f.limit}&offset=${f.offset}&closesOnly=${f.closesOnly}`;
+    const data = await api(`/api/fills/${state.address}?${q}`);
+    f.rows = data.fills;
+    f.total = data.total;
+    f.tids = new Set(data.fills.map((r) => r.tid));
+    renderFills();
+  } catch (err) { showError(err.message); }
 }
 
 function renderWalletBadge(address) {
@@ -143,6 +191,7 @@ async function refresh(showLoad = true) {
     const data = await api(`/api/account/${state.address}`);
     renderAccount(data);
     await loadHistory();
+    await loadFills();
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
 }
@@ -163,6 +212,7 @@ async function loadWallets(selected) {
 
 async function selectAddress(address) {
   state.address = address; state.history = [];
+  state.fills.offset = 0; state.fills.tids = new Set();
   renderWalletBadge(address);
   await refresh(true);
   await loadAgents(address);
@@ -172,11 +222,32 @@ async function selectAddress(address) {
 async function init() {
   setStatus('Connecting…');
   // chart toggle
-  document.querySelectorAll('.toggle button').forEach((b) =>
+  document.querySelectorAll('#chartToggle button').forEach((b) =>
     b.addEventListener('click', () => {
-      document.querySelectorAll('.toggle button').forEach((x) => x.classList.remove('active'));
+      document.querySelectorAll('#chartToggle button').forEach((x) => x.classList.remove('active'));
       b.classList.add('active'); state.series = b.dataset.series; drawChart();
     }));
+  // fills filter toggle
+  const setFillsFilter = (closesOnly, activeBtn) => {
+    document.querySelectorAll('#fillsAllBtn, #fillsClosesBtn').forEach((b) => b.classList.remove('active'));
+    activeBtn.classList.add('active');
+    state.fills.closesOnly = closesOnly;
+    state.fills.offset = 0;
+    loadFills();
+  };
+  $('fillsAllBtn').addEventListener('click', (e) => setFillsFilter(false, e.currentTarget));
+  $('fillsClosesBtn').addEventListener('click', (e) => setFillsFilter(true, e.currentTarget));
+  $('fillsPrev').addEventListener('click', () => {
+    state.fills.offset = Math.max(0, state.fills.offset - state.fills.limit);
+    loadFills();
+  });
+  $('fillsNext').addEventListener('click', () => {
+    if (state.fills.offset + state.fills.limit < state.fills.total) {
+      state.fills.offset += state.fills.limit;
+      loadFills();
+    }
+  });
+
   $('refreshBtn').addEventListener('click', () => refresh(true));
   window.addEventListener('resize', drawChart);
 
