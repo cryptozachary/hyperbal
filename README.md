@@ -22,7 +22,9 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   Price, Leverage, Margin Used, Unrealized PnL, ROE %.
 - **Equity / PnL history chart** — hand-drawn on a `<canvas>` (no chart library),
   backed by snapshots persisted in SQLite.
-- **Watched wallets** — add/remove wallets; they persist across restarts.
+- **Watched wallets** — add wallets and they persist across restarts; delete one
+  with the **✕ Delete** button (after a confirmation, since deleting also purges
+  that wallet's stored history — see Limitations).
 - **Agent wallet recognition** — paste a Hyperliquid agent (API) wallet address and
   it automatically resolves to the master account it signs for (agent wallets hold
   no funds), with a badge showing the relationship. A **Connected Agent Wallets**
@@ -33,6 +35,9 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   (USDC / USDT0 / USDH / USDE).
 - **Cumulative realized PnL** — accumulated by deduping observed trade fills, so it
   keeps growing beyond Hyperliquid's limited recent-fills window.
+- **Trade history** — a paginated table of every fill this dashboard has observed
+  (time, coin, direction, size, price, fee, realized PnL), with a **closes only**
+  filter. New fills append live.
 - Clear loading, empty, and error states. Positive/negative PnL coloring.
 - Responsive (desktop + mobile).
 
@@ -75,7 +80,8 @@ You can set the wallet **two ways** (no address is hardcoded anywhere):
 
 1. **Environment:** set `DEFAULT_WALLET=0x...` to pre-load a wallet on startup.
 2. **In the UI:** type a `0x…` address into the **Add** field. Saved wallets
-   appear in the dropdown and persist across restarts; remove with the ✕ button.
+   appear in the dropdown and persist across restarts; delete one with the
+   **✕ Delete** button (this also erases its stored history — see Limitations).
 
 To point at **testnet**, set `HL_API_URL=https://api.hyperliquid-testnet.xyz/info`
 and `HL_WS_URL=wss://api.hyperliquid-testnet.xyz/ws`.
@@ -154,6 +160,12 @@ All public, read-only:
 - **Only Hyperliquid is shown.** Perps that aren't on Hyperliquid — e.g. the
   USDT-margined pairs in some wallets' "Perps" tabs (Bitget's own engine) — are a
   different venue and cannot appear here.
+- **Deleting a wallet erases its stored data.** Removing a wallet purges its
+  observed fills and equity snapshots along with the wallet entry. Because
+  realized PnL is cumulative since first observation and Hyperliquid only serves
+  a limited recent-fills window, this history cannot be rebuilt by re-adding the
+  wallet. Note that a wallet set via `DEFAULT_WALLET` is re-added (empty) on the
+  next page load — clear the env var to stop that.
 - Single-user, no authentication — intended to run locally on your own machine.
 
 ## Security

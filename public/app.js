@@ -125,6 +125,24 @@ function renderWalletBadge(address) {
   }
 }
 
+// Clear every panel back to its empty state — used when the last wallet is deleted.
+function resetDashboard() {
+  state.address = null;
+  state.history = [];
+  state.fills = { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false, tids: new Set() };
+  for (const id of ['equity', 'uPnl', 'rPnl']) { $(id).textContent = '—'; $(id).className = 'card-value'; }
+  $('rPnlRecent').textContent = '';
+  $('posCount').textContent = '—';
+  $('positions').querySelector('tbody').innerHTML = '';
+  $('emptyState').classList.remove('hidden');
+  $('agentsPanel').innerHTML = '';
+  $('walletBadge').classList.add('hidden');
+  renderFills();
+  drawChart();
+  clearError();
+  setStatus('Enter a wallet', 'poll');
+}
+
 async function loadAgents(address) {
   const panel = $('agentsPanel');
   panel.innerHTML = '';
@@ -190,6 +208,7 @@ function connectWs() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'refresh') scheduleRefresh();
     else if (msg.type === 'realized') {
+      if (!state.address) return; // wallet was just deleted; ignore in-flight fills for it
       $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative);
       appendLiveFills(msg.fills);
     }
@@ -285,8 +304,18 @@ async function init() {
   });
   $('removeBtn').addEventListener('click', async () => {
     const a = $('walletSelect').value; if (!a) return;
-    await api(`/api/wallets/${a}`, { method: 'DELETE' }); await loadWallets();
-    const next = $('walletSelect').value; if (next) selectAddress(next);
+    const meta = state.walletMeta[a];
+    const name = meta?.label ? `${meta.label} (${short(a)})` : short(a);
+    // Purging is irreversible: realized PnL is cumulative since first observed and
+    // Hyperliquid only re-serves a limited recent window.
+    if (!confirm(`Delete ${name}?\n\nThis also erases its stored trade history and equity snapshots. This cannot be undone.`)) return;
+    try {
+      await api(`/api/wallets/${a}`, { method: 'DELETE' });
+      await loadWallets();
+      const next = $('walletSelect').value;
+      if (next) await selectAddress(next);
+      else resetDashboard();
+    } catch (e) { showError(e.message); }
   });
   $('walletSelect').addEventListener('change', (e) => selectAddress(e.target.value));
 
