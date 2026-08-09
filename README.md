@@ -147,9 +147,15 @@ All public, read-only:
   so the total grows over time — but fills that occurred **before** you first ran
   the dashboard, or that scrolled out of Hyperliquid's window before being
   observed, are not included. It is **not** a complete lifetime realized PnL.
-- **Equity/PnL history snapshots accrue only for wallets you actively view** (and
-  are throttled to one per `SNAPSHOT_MIN_INTERVAL_MS`). The chart fills in over
-  time as you use the dashboard; it won't show history from before you ran it.
+- **Nothing is stored for a wallet that isn't on your saved list.** Fills, equity
+  snapshots, and the wallet entry itself are only written for wallets added via
+  the **Add** field (or `DEFAULT_WALLET`). Viewing an address the dashboard
+  doesn't have saved shows live data but persists none of it — this is what keeps
+  a deleted wallet deleted when a background poll or a second browser tab is
+  still asking for it.
+- **Equity/PnL history snapshots accrue only for saved wallets you actively view**
+  (and are throttled to one per `SNAPSHOT_MIN_INTERVAL_MS`). The chart fills in
+  over time as you use the dashboard; it won't show history from before you ran it.
 - **Agent wallets resolve to the master account** and have no separate PnL — all
   trading through an agent accrues to the master. The dashboard never approves,
   revokes, or names agents (read-only); it only reads the `userRole`/`extraAgents`
