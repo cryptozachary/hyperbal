@@ -20,12 +20,13 @@ export function attachWsHub(httpServer, { db, stream }) {
     broadcast(address, { type: 'refresh' });
   });
 
-  // Persist + relay live fills.
+  // Persist + relay live fills. Rows ride along on this message so one upstream
+  // event produces exactly one downstream message.
   stream.on('fills', ({ address, rows, recentRealized }) => {
     if (!address) return;
     db.ingestFills(address, rows);
     broadcast(address, { type: 'realized',
-      realizedPnlCumulative: db.cumulativeRealized(address), realizedPnlRecent: recentRealized });
+      realizedPnlCumulative: db.cumulativeRealized(address), realizedPnlRecent: recentRealized, fills: rows });
   });
 
   wss.on('connection', (client) => {

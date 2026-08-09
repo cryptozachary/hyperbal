@@ -96,6 +96,24 @@ async function loadFills() {
   } catch (err) { showError(err.message); }
 }
 
+// Append live fills to the visible page. Only splices rows in at offset 0 — on any
+// other page they're already committed to the DB and appear on navigation.
+function appendLiveFills(rows) {
+  const f = state.fills;
+  if (!Array.isArray(rows) || !rows.length) return;
+  const fresh = rows.filter((r) => r && Number.isFinite(r.tid) && !f.tids.has(r.tid));
+  if (!fresh.length) return;
+  for (const r of fresh) f.tids.add(r.tid);
+  const matching = fresh.filter((r) => !f.closesOnly || r.closed_pnl !== 0);
+  f.total += matching.length;
+  if (f.offset !== 0) { renderFills(); return; }
+  if (matching.length) {
+    matching.sort((a, b) => b.ts - a.ts || b.tid - a.tid);
+    f.rows = [...matching, ...f.rows].slice(0, f.limit);
+  }
+  renderFills();
+}
+
 function renderWalletBadge(address) {
   const meta = state.walletMeta[address];
   const el = $('walletBadge');
@@ -171,7 +189,10 @@ function connectWs() {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'refresh') scheduleRefresh();
-    else if (msg.type === 'realized') { $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative); }
+    else if (msg.type === 'realized') {
+      $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative);
+      appendLiveFills(msg.fills);
+    }
     else if (msg.type === 'error') showError(msg.message);
   };
   // WS down, but the always-on 30s poll keeps data fresh — show "Polling" (not an alarming "down" state) while we reconnect in the background.

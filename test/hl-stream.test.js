@@ -79,3 +79,21 @@ test('userFills message emits normalized fills with address', async () => {
   assert.equal(evt.rows[0].tid, 7);
   assert.equal(evt.recentRealized, 3);
 });
+
+test('normalized fill rows carry the fields the hub broadcasts', async () => {
+  const { stream, getWs } = makeStream();
+  stream.start();
+  await new Promise((r) => setTimeout(r, 5));
+  stream.track(ADDR);
+  const got = new Promise((resolve) => stream.on('fills', resolve));
+  getWs().emit('message', JSON.stringify({
+    channel: 'userFills',
+    data: { user: ADDR, fills: [
+      { tid: 9, coin: 'BTC', closedPnl: '3', fee: '0.1', px: '100', sz: '1', side: 'A', dir: 'Close Long', time: 5 },
+    ] },
+  }));
+  const evt = await got;
+  assert.equal(evt.rows[0].dir, 'Close Long');
+  assert.equal(evt.rows[0].coin, 'BTC');
+  assert.equal(evt.rows[0].ts, 5);
+});
