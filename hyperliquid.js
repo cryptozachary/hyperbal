@@ -87,6 +87,7 @@ export function normalizeFills(fills) {
     px: parseNum(f.px),
     sz: parseNum(f.sz),
     side: f.side ?? null,
+    dir: f.dir ?? null,
     ts: parseNum(f.time),
   })).filter((r) => Number.isFinite(r.tid));
   const recentRealized = rows.reduce((s, r) => s + r.closed_pnl, 0);

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS fills (
   px REAL,
   sz REAL,
   side TEXT,
+  dir TEXT,
   ts INTEGER,
   PRIMARY KEY (address, tid)
 );
@@ -47,6 +48,12 @@ export function openDb(dbPath) {
     db.exec(`ALTER TABLE wallets ADD COLUMN via_agent TEXT`);
   }
 
+  // Migration: add fills.dir to DBs created before trade-history support.
+  const fillCols = db.prepare(`PRAGMA table_info(fills)`).all();
+  if (!fillCols.some((c) => c.name === 'dir')) {
+    db.exec(`ALTER TABLE fills ADD COLUMN dir TEXT`);
+  }
+
   const stmts = {
     // via_agent uses COALESCE: a null upsert (e.g. per-load refresh) preserves it; a non-null upsert overwrites it.
     upsertWallet: db.prepare(`
@@ -60,8 +67,8 @@ export function openDb(dbPath) {
     listWallets: db.prepare(`SELECT address, label, via_agent, added_at, last_viewed_at FROM wallets ORDER BY last_viewed_at DESC NULLS LAST, added_at DESC`),
     removeWallet: db.prepare(`DELETE FROM wallets WHERE address = ?`),
     insertFill: db.prepare(`
-      INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, ts)
-      VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @ts)
+      INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, ts)
+      VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @ts)
     `),
     cumulativeRealized: db.prepare(`SELECT COALESCE(SUM(closed_pnl),0) AS total FROM fills WHERE address = ?`),
     lastSnapshotTs: db.prepare(`SELECT MAX(ts) AS ts FROM snapshots WHERE address = ?`),
@@ -73,7 +80,7 @@ export function openDb(dbPath) {
   };
 
   const ingestTxn = db.transaction((address, fills) => {
-    for (const f of fills) stmts.insertFill.run({ address, ...f });
+    for (const f of fills) stmts.insertFill.run({ address, dir: null, ...f });
   });
 
   return {
