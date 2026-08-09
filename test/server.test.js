@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { createApp } from '../server.js';
 import { _resetDexCaches } from '../hyperliquid.js';
 
-function fakeDb() {
+function fakeDb(fills = []) {
   const wallets = [];
+  const match = (f, closesOnly) => !closesOnly || f.closed_pnl !== 0;
   return {
     upsertWallet(address, label = null, viaAgent = null) {
       const existing = wallets.find((w) => w.address === address);
@@ -14,11 +15,19 @@ function fakeDb() {
     listWallets() { return wallets; },
     removeWallet() {}, ingestFills() {}, cumulativeRealized() { return 0; },
     getHistory() { return []; }, insertSnapshotThrottled() { return false; },
+    listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
+      return fills.filter((f) => match(f, closesOnly))
+        .sort((a, b) => b.ts - a.ts || b.tid - a.tid)
+        .slice(offset, offset + limit);
+    },
+    countFills(_address, { closesOnly = false } = {}) {
+      return fills.filter((f) => match(f, closesOnly)).length;
+    },
   };
 }
 
-async function withServer(overrides, fn) {
-  const server = createApp(fakeDb(), overrides).listen(0);
+async function withServer(overrides, fn, fills = []) {
+  const server = createApp(fakeDb(fills), overrides).listen(0);
   await new Promise((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try { return await fn(base); } finally { server.close(); }
@@ -117,5 +126,53 @@ test('GET /api/account aggregates positions across main + builder dex', async ()
     const sp = json.positions.find((p) => p.coin === 'xyz:SP500');
     assert.equal(sp.dex, 'xyz');
     assert.equal(sp.collateral, 'USDC');
+  });
+});
+
+const FILLS_ACC = '0x' + '6'.repeat(40);
+const SEED_FILLS = [
+  { tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', dir: 'Close Long', ts: 10 },
+  { tid: 2, coin: 'BTC', closed_pnl: 0, fee: 0.1, px: 100, sz: 1, side: 'B', dir: 'Open Long', ts: 20 },
+  { tid: 3, coin: 'ETH', closed_pnl: -2, fee: 0.1, px: 50, sz: 2, side: 'A', dir: 'Close Long', ts: 30 },
+];
+
+test('GET /api/fills returns paginated fills with a total', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/fills/${FILLS_ACC}?limit=2&offset=0`);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.address, FILLS_ACC);
+    assert.deepEqual(json.fills.map((f) => f.tid), [3, 2]);
+    assert.equal(json.total, 3);
+    assert.equal(json.limit, 2);
+    assert.equal(json.offset, 0);
+  }, SEED_FILLS);
+});
+
+test('GET /api/fills honors closesOnly only for the exact string "true"', async () => {
+  await withServer({}, async (base) => {
+    const on = await (await fetch(`${base}/api/fills/${FILLS_ACC}?closesOnly=true`)).json();
+    assert.deepEqual(on.fills.map((f) => f.tid), [3, 1]);
+    assert.equal(on.total, 2);
+    const off = await (await fetch(`${base}/api/fills/${FILLS_ACC}?closesOnly=yes`)).json();
+    assert.equal(off.total, 3);
+  }, SEED_FILLS);
+});
+
+test('GET /api/fills clamps limit and offset', async () => {
+  await withServer({}, async (base) => {
+    const big = await (await fetch(`${base}/api/fills/${FILLS_ACC}?limit=9999`)).json();
+    assert.equal(big.limit, 200);
+    const zero = await (await fetch(`${base}/api/fills/${FILLS_ACC}?limit=0`)).json();
+    assert.equal(zero.limit, 50); // 0 is falsy -> default, then clamped into range
+    const neg = await (await fetch(`${base}/api/fills/${FILLS_ACC}?offset=-5`)).json();
+    assert.equal(neg.offset, 0);
+  }, SEED_FILLS);
+});
+
+test('GET /api/fills rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/fills/nope`);
+    assert.equal(res.status, 400);
   });
 });

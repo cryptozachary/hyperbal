@@ -34,6 +34,22 @@ export function createApp(db, overrides = {}) {
     res.json({ address, points: db.getHistory(address, since) });
   });
 
+  app.get('/api/fills/:address', (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    // Clamp server-side so a hand-crafted request can't ask for the whole table.
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const closesOnly = req.query.closesOnly === 'true';
+    res.json({
+      address,
+      fills: db.listFills(address, { limit, offset, closesOnly }),
+      total: db.countFills(address, { closesOnly }),
+      limit,
+      offset,
+    });
+  });
+
   app.get('/api/wallets', (_req, res) => res.json({ wallets: db.listWallets() }));
 
   app.post('/api/wallets', async (req, res) => {
