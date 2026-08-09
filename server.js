@@ -17,7 +17,8 @@ export function createApp(db, overrides = {}) {
   const app = express();
   app.use(express.json());
 
-  const opts = { apiUrl: config.hlApiUrl, snapshotMinIntervalMs: config.snapshotMinIntervalMs, ...overrides };
+  const { stream = null, ...rest } = overrides;
+  const opts = { apiUrl: config.hlApiUrl, snapshotMinIntervalMs: config.snapshotMinIntervalMs, ...rest };
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: Date.now() }));
 
@@ -76,7 +77,10 @@ export function createApp(db, overrides = {}) {
 
   app.delete('/api/wallets/:address', (req, res) => {
     const address = String(req.params.address || '').toLowerCase();
-    db.removeWallet(address);
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    db.deleteWallet(address);
+    // Without this the live userFills subscription re-inserts the fills we just purged.
+    stream?.untrack(address);
     res.json({ wallets: db.listWallets() });
   });
 
@@ -97,10 +101,10 @@ export function createApp(db, overrides = {}) {
 
 if (process.argv[1]?.endsWith('server.js')) {
   const db = openDb(config.dbPath);
-  const app = createApp(db);
+  const stream = createStream({ wsUrl: config.hlWsUrl });
+  const app = createApp(db, { stream });
   const server = app.listen(config.port, () => console.log(`Dashboard on http://localhost:${config.port}`));
 
-  const stream = createStream({ wsUrl: config.hlWsUrl });
   stream.start();
   // Re-track all previously-watched wallets so fills accumulate even before a browser connects.
   for (const w of db.listWallets()) stream.track(w.address);

@@ -73,5 +73,9 @@ export function createStream({ wsUrl, WebSocketImpl = WebSocket, wsFactory } = {
     track(address) {
       if (!tracked.has(address)) { tracked.add(address); subscribe({ type: 'userFills', user: address }); }
     },
+    // Independent of the ref-counted watch/unwatch pair — `tracked` is a plain set.
+    untrack(address) {
+      if (tracked.delete(address)) unsubscribe({ type: 'userFills', user: address });
+    },
   });
 }

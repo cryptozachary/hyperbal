@@ -16,8 +16,27 @@ test('wallet upsert/list/remove', () => {
   let rows = db.listWallets();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].label, 'renamed');
-  db.removeWallet('0xabc');
+  db.deleteWallet('0xabc');
   assert.equal(db.listWallets().length, 0);
+});
+
+test('deleteWallet purges snapshots and fills for that address only', () => {
+  const db = freshDb();
+  for (const addr of ['0xaaa', '0xbbb']) {
+    db.upsertWallet(addr, 'w');
+    db.ingestFills(addr, [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', dir: 'Close Long', ts: 10 }]);
+    db.insertSnapshotThrottled(addr, { ts: 1000, equity: 1, unrealized_pnl: 0, realized_pnl_cum: 0, open_positions: 0 }, 0);
+  }
+  db.deleteWallet('0xaaa');
+
+  assert.equal(db.listWallets().length, 1);
+  assert.equal(db.listWallets()[0].address, '0xbbb');
+  assert.equal(db.countFills('0xaaa'), 0);
+  assert.equal(db.cumulativeRealized('0xaaa'), 0);
+  assert.equal(db.getHistory('0xaaa').length, 0);
+  // the surviving wallet is untouched
+  assert.equal(db.countFills('0xbbb'), 1);
+  assert.equal(db.getHistory('0xbbb').length, 1);
 });
 
 test('fills dedupe and cumulative realized', () => {

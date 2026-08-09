@@ -14,7 +14,7 @@ function fakeDb(fills = []) {
       else wallets.push({ address, label, via_agent: viaAgent });
     },
     listWallets() { return wallets; },
-    removeWallet() {}, ingestFills() {}, cumulativeRealized() { return 0; },
+    deleteWallet() {}, ingestFills() {}, cumulativeRealized() { return 0; },
     getHistory() { return []; }, insertSnapshotThrottled() { return false; },
     listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
       return fills.filter((f) => match(f, closesOnly))
@@ -64,6 +64,30 @@ test('POST /api/wallets rejects an invalid address', async () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: 'nope' }),
     });
     assert.equal(res.status, 400);
+  });
+});
+
+test('DELETE /api/wallets rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/wallets/nope`, { method: 'DELETE' });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('DELETE /api/wallets purges and untracks the address', async () => {
+  const untracked = [];
+  const stream = { untrack: (a) => untracked.push(a) };
+  await withServer({ stream }, async (base) => {
+    const res = await fetch(`${base}/api/wallets/${MASTER}`, { method: 'DELETE' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(untracked, [MASTER]);
+  });
+});
+
+test('DELETE /api/wallets works without a stream', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/wallets/${MASTER}`, { method: 'DELETE' });
+    assert.equal(res.status, 200);
   });
 });
 

@@ -46,6 +46,28 @@ test('unwatch ref-counts down and unsubscribes at zero', async () => {
   assert.equal(unsubs.length, 1);
 });
 
+test('untrack unsubscribes userFills and drops it from the reconnect set', async () => {
+  const { stream, getWs } = makeStream();
+  stream.start();
+  await new Promise((r) => setTimeout(r, 5));
+  stream.track(ADDR);
+  stream.untrack(ADDR);
+  const unsubs = getWs().sent.filter((m) => m.method === 'unsubscribe' && m.subscription.type === 'userFills');
+  assert.equal(unsubs.length, 1);
+  assert.equal(unsubs[0].subscription.user, ADDR);
+
+  // untracking twice must not send a second unsubscribe
+  stream.untrack(ADDR);
+  assert.equal(getWs().sent.filter((m) => m.method === 'unsubscribe' && m.subscription.type === 'userFills').length, 1);
+
+  // on reconnect the address must not be resubscribed
+  const before = getWs();
+  before.emit('close');
+  await new Promise((r) => setTimeout(r, 1100));
+  const resubs = getWs().sent.filter((m) => m.method === 'subscribe' && m.subscription.type === 'userFills');
+  assert.equal(resubs.length, 0);
+});
+
 test('webData2 message emits normalized account with address', async () => {
   const { stream, getWs } = makeStream();
   stream.start();

@@ -66,6 +66,8 @@ export function openDb(dbPath) {
     `),
     listWallets: db.prepare(`SELECT address, label, via_agent, added_at, last_viewed_at FROM wallets ORDER BY last_viewed_at DESC NULLS LAST, added_at DESC`),
     removeWallet: db.prepare(`DELETE FROM wallets WHERE address = ?`),
+    removeSnapshots: db.prepare(`DELETE FROM snapshots WHERE address = ?`),
+    removeFills: db.prepare(`DELETE FROM fills WHERE address = ?`),
     insertFill: db.prepare(`
       INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, ts)
       VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @ts)
@@ -93,13 +95,21 @@ export function openDb(dbPath) {
     for (const f of fills) stmts.insertFill.run({ address, dir: null, ...f });
   });
 
+  // One transaction so a mid-delete failure can't leave a wallet whose row is
+  // gone but whose fills and snapshots remain.
+  const deleteWalletTxn = db.transaction((address) => {
+    stmts.removeWallet.run(address);
+    stmts.removeSnapshots.run(address);
+    stmts.removeFills.run(address);
+  });
+
   return {
     raw: db,
     upsertWallet(address, label = null, viaAgent = null) {
       stmts.upsertWallet.run({ address, label, viaAgent, now: Date.now() });
     },
     listWallets() { return stmts.listWallets.all(); },
-    removeWallet(address) { stmts.removeWallet.run(address); },
+    deleteWallet(address) { deleteWalletTxn(address); },
     ingestFills(address, fills) { if (fills?.length) ingestTxn(address, fills); },
     cumulativeRealized(address) { return stmts.cumulativeRealized.get(address).total; },
     listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
