@@ -6,8 +6,9 @@ const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const state = {
-  address: null, ws: null, pollTimer: null, refreshTimer: null, series: 'equity', history: [], wsConnected: false, walletMeta: {},
-  fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false, tids: new Set() },
+  address: null, ws: null, pollTimer: null, refreshTimer: null, fillsReloadTimer: null,
+  series: 'equity', history: [], wsConnected: false, walletMeta: {},
+  fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false },
 };
 
 async function api(path, opts) {
@@ -83,35 +84,32 @@ function renderFills() {
   $('fillsNext').disabled = f.offset + f.limit >= f.total;
 }
 
-async function loadFills() {
+async function loadFills(retried = false) {
   if (!state.address) { state.fills.rows = []; state.fills.total = 0; renderFills(); return; }
   const f = state.fills;
   try {
     const q = `limit=${f.limit}&offset=${f.offset}&closesOnly=${f.closesOnly}`;
     const data = await api(`/api/fills/${state.address}?${q}`);
+    // The page can fall off the end of the data (a purge elsewhere, another tab,
+    // a server restart). Clamp back to the last real page instead of rendering an
+    // empty table under a "401–300 of 300" range.
+    if (!retried && !data.fills.length && data.total > 0 && f.offset > 0) {
+      f.offset = Math.max(0, (Math.ceil(data.total / f.limit) - 1) * f.limit);
+      return loadFills(true);
+    }
     f.rows = data.fills;
     f.total = data.total;
-    f.tids = new Set(data.fills.map((r) => r.tid));
     renderFills();
   } catch (err) { showError(err.message); }
 }
 
-// Append live fills to the visible page. Only splices rows in at offset 0 — on any
-// other page they're already committed to the DB and appear on navigation.
-function appendLiveFills(rows) {
-  const f = state.fills;
-  if (!Array.isArray(rows) || !rows.length) return;
-  const fresh = rows.filter((r) => r && Number.isFinite(r.tid) && !f.tids.has(r.tid));
-  if (!fresh.length) return;
-  for (const r of fresh) f.tids.add(r.tid);
-  const matching = fresh.filter((r) => !f.closesOnly || r.closed_pnl !== 0);
-  f.total += matching.length;
-  if (f.offset !== 0) { renderFills(); return; }
-  if (matching.length) {
-    matching.sort((a, b) => b.ts - a.ts || b.tid - a.tid);
-    f.rows = [...matching, ...f.rows].slice(0, f.limit);
-  }
-  renderFills();
+// New fills arrived. Re-read page 1 from the server rather than splicing them in:
+// the upstream userFills sub replays a snapshot on every reconnect, so a client-side
+// running total drifts and a blind prepend can push the genuinely-newest rows off
+// the page. The DB is the only thing that knows the real count and order.
+function scheduleFillsReload() {
+  if (state.fillsReloadTimer || state.fills.offset !== 0) return;
+  state.fillsReloadTimer = setTimeout(() => { state.fillsReloadTimer = null; loadFills(); }, 300);
 }
 
 function renderWalletBadge(address) {
@@ -129,7 +127,8 @@ function renderWalletBadge(address) {
 function resetDashboard() {
   state.address = null;
   state.history = [];
-  state.fills = { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false, tids: new Set() };
+  state.fills = { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false };
+  clearTimeout(state.fillsReloadTimer); state.fillsReloadTimer = null;
   for (const id of ['equity', 'uPnl', 'rPnl']) { $(id).textContent = '—'; $(id).className = 'card-value'; }
   $('rPnlRecent').textContent = '';
   $('posCount').textContent = '—';
@@ -209,11 +208,15 @@ function connectWs() {
   ws.onopen = () => { state.wsConnected = true; setStatus('Live', 'live'); if (state.address) ws.send(JSON.stringify({ type: 'watch', address: state.address })); };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    // The hub keeps routing the previously-watched address until our `watch` for the
+    // new one lands, so a broadcast can outrun a wallet switch. Ignore anything not
+    // for the wallet on screen — and anything at all once it's been deleted.
+    if (msg.address && msg.address !== state.address) return;
     if (msg.type === 'refresh') scheduleRefresh();
     else if (msg.type === 'realized') {
       if (!state.address) return; // wallet was just deleted; ignore in-flight fills for it
       $('rPnl').textContent = fmtUsd(msg.realizedPnlCumulative); $('rPnl').className = 'card-value ' + cls(msg.realizedPnlCumulative);
-      appendLiveFills(msg.fills);
+      scheduleFillsReload();
     }
     else if (msg.type === 'error') showError(msg.message);
   };
@@ -255,7 +258,7 @@ async function loadWallets(selected) {
 
 async function selectAddress(address) {
   state.address = address; state.history = [];
-  state.fills.offset = 0; state.fills.tids = new Set();
+  state.fills.offset = 0;
   renderWalletBadge(address);
   await refresh(true);
   await loadAgents(address);

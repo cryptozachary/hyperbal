@@ -65,6 +65,10 @@ export function openDb(dbPath) {
         last_viewed_at = excluded.last_viewed_at
     `),
     listWallets: db.prepare(`SELECT address, label, via_agent, added_at, last_viewed_at FROM wallets ORDER BY last_viewed_at DESC NULLS LAST, added_at DESC`),
+    hasWallet: db.prepare(`SELECT 1 FROM wallets WHERE address = ?`),
+    // Touch-only: unlike upsertWallet this never inserts, so viewing an account
+    // can't resurrect a wallet that was deleted.
+    touchWallet: db.prepare(`UPDATE wallets SET last_viewed_at = @now WHERE address = @address`),
     removeWallet: db.prepare(`DELETE FROM wallets WHERE address = ?`),
     removeSnapshots: db.prepare(`DELETE FROM snapshots WHERE address = ?`),
     removeFills: db.prepare(`DELETE FROM fills WHERE address = ?`),
@@ -109,6 +113,8 @@ export function openDb(dbPath) {
       stmts.upsertWallet.run({ address, label, viaAgent, now: Date.now() });
     },
     listWallets() { return stmts.listWallets.all(); },
+    hasWallet(address) { return stmts.hasWallet.get(address) !== undefined; },
+    touchWallet(address) { stmts.touchWallet.run({ address, now: Date.now() }); },
     deleteWallet(address) { deleteWalletTxn(address); },
     ingestFills(address, fills) { if (fills?.length) ingestTxn(address, fills); },
     cumulativeRealized(address) { return stmts.cumulativeRealized.get(address).total; },

@@ -14,7 +14,10 @@ function fakeDb(fills = []) {
       else wallets.push({ address, label, via_agent: viaAgent });
     },
     listWallets() { return wallets; },
-    deleteWallet() {}, ingestFills() {}, cumulativeRealized() { return 0; },
+    hasWallet(address) { return wallets.some((w) => w.address === address); },
+    touchWallet() {},
+    deleteWallet(address) { const i = wallets.findIndex((w) => w.address === address); if (i >= 0) wallets.splice(i, 1); },
+    ingestFills() {}, cumulativeRealized() { return 0; },
     getHistory() { return []; }, insertSnapshotThrottled() { return false; },
     listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
       return fills.filter((f) => match(f, closesOnly))
