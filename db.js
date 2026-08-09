@@ -71,6 +71,16 @@ export function openDb(dbPath) {
       VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @ts)
     `),
     cumulativeRealized: db.prepare(`SELECT COALESCE(SUM(closed_pnl),0) AS total FROM fills WHERE address = ?`),
+    listFillsAll: db.prepare(`
+      SELECT tid, coin, closed_pnl, fee, px, sz, side, dir, ts FROM fills
+      WHERE address = ? ORDER BY ts DESC, tid DESC LIMIT ? OFFSET ?
+    `),
+    listFillsCloses: db.prepare(`
+      SELECT tid, coin, closed_pnl, fee, px, sz, side, dir, ts FROM fills
+      WHERE address = ? AND closed_pnl != 0 ORDER BY ts DESC, tid DESC LIMIT ? OFFSET ?
+    `),
+    countFillsAll: db.prepare(`SELECT COUNT(*) AS n FROM fills WHERE address = ?`),
+    countFillsCloses: db.prepare(`SELECT COUNT(*) AS n FROM fills WHERE address = ? AND closed_pnl != 0`),
     lastSnapshotTs: db.prepare(`SELECT MAX(ts) AS ts FROM snapshots WHERE address = ?`),
     insertSnapshot: db.prepare(`
       INSERT INTO snapshots (address, ts, equity, unrealized_pnl, realized_pnl_cum, open_positions)
@@ -92,6 +102,12 @@ export function openDb(dbPath) {
     removeWallet(address) { stmts.removeWallet.run(address); },
     ingestFills(address, fills) { if (fills?.length) ingestTxn(address, fills); },
     cumulativeRealized(address) { return stmts.cumulativeRealized.get(address).total; },
+    listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
+      return (closesOnly ? stmts.listFillsCloses : stmts.listFillsAll).all(address, limit, offset);
+    },
+    countFills(address, { closesOnly = false } = {}) {
+      return (closesOnly ? stmts.countFillsCloses : stmts.countFillsAll).get(address).n;
+    },
     getHistory(address, since = 0) { return stmts.getHistory.all(address, since); },
     // Returns true if a snapshot was written, false if throttled.
     insertSnapshotThrottled(address, point, minIntervalMs) {

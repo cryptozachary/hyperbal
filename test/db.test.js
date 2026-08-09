@@ -80,6 +80,44 @@ test('ingestFills stores dir and defaults it when the caller omits it', () => {
   assert.equal(rows[1].dir, null);
 });
 
+test('listFills paginates newest-first with stable ordering and closesOnly filter', () => {
+  const db = freshDb();
+  // tids 3 and 4 share a timestamp — ordering must still be total
+  db.ingestFills('0xabc', [
+    { tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', dir: 'Close Long', ts: 10 },
+    { tid: 2, coin: 'BTC', closed_pnl: 0, fee: 0.1, px: 100, sz: 1, side: 'B', dir: 'Open Long', ts: 20 },
+    { tid: 3, coin: 'ETH', closed_pnl: -2, fee: 0.1, px: 50, sz: 2, side: 'A', dir: 'Close Long', ts: 30 },
+    { tid: 4, coin: 'ETH', closed_pnl: 0, fee: 0.1, px: 50, sz: 2, side: 'B', dir: 'Open Long', ts: 30 },
+  ]);
+
+  const all = db.listFills('0xabc', { limit: 50, offset: 0 });
+  assert.deepEqual(all.map((r) => r.tid), [4, 3, 2, 1]);
+  assert.equal(db.countFills('0xabc'), 4);
+
+  // pagination covers every row exactly once
+  const p1 = db.listFills('0xabc', { limit: 2, offset: 0 });
+  const p2 = db.listFills('0xabc', { limit: 2, offset: 2 });
+  assert.deepEqual(p1.map((r) => r.tid), [4, 3]);
+  assert.deepEqual(p2.map((r) => r.tid), [2, 1]);
+
+  const closes = db.listFills('0xabc', { limit: 50, offset: 0, closesOnly: true });
+  assert.deepEqual(closes.map((r) => r.tid), [3, 1]);
+  assert.equal(db.countFills('0xabc', { closesOnly: true }), closes.length);
+
+  // rows carry the columns the UI renders
+  assert.equal(all[0].coin, 'ETH');
+  assert.equal(all[0].dir, 'Open Long');
+  assert.equal(all[0].fee, 0.1);
+});
+
+test('listFills is scoped to one address', () => {
+  const db = freshDb();
+  db.ingestFills('0xaaa', [{ tid: 1, coin: 'BTC', closed_pnl: 1, fee: 0, px: 1, sz: 1, side: 'A', dir: 'Close Long', ts: 1 }]);
+  db.ingestFills('0xbbb', [{ tid: 2, coin: 'ETH', closed_pnl: 2, fee: 0, px: 1, sz: 1, side: 'A', dir: 'Close Long', ts: 2 }]);
+  assert.equal(db.countFills('0xaaa'), 1);
+  assert.equal(db.listFills('0xaaa', { limit: 50, offset: 0 })[0].coin, 'BTC');
+});
+
 test('migration adds via_agent to a pre-existing wallets table', async () => {
   const Database = (await import('better-sqlite3')).default;
   const p = path.join(os.tmpdir(), `hl-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
