@@ -5,7 +5,8 @@ import { _resetDexCaches } from '../hyperliquid.js';
 
 function fakeDb(fills = []) {
   const wallets = [];
-  const match = (f, closesOnly) => !closesOnly || f.closed_pnl !== 0;
+  // Mirrors SQL `closed_pnl != 0`, which excludes NULL under three-valued logic.
+  const match = (f, closesOnly) => !closesOnly || (f.closed_pnl != null && f.closed_pnl !== 0);
   return {
     upsertWallet(address, label = null, viaAgent = null) {
       const existing = wallets.find((w) => w.address === address);
@@ -175,4 +176,32 @@ test('GET /api/fills rejects an invalid address', async () => {
     const res = await fetch(`${base}/api/fills/nope`);
     assert.equal(res.status, 400);
   });
+});
+
+// The fakeDb double slices a JS array, which tolerates 1.5 and Infinity — only a
+// real SQLite binding proves the clamp produces a usable integer.
+test('GET /api/fills survives non-integer limit/offset against a real DB', async () => {
+  const { openDb } = await import('../db.js');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const db = openDb(path.join(os.tmpdir(), `hl-route-${Date.now()}-${Math.random().toString(16).slice(2)}.db`));
+  db.ingestFills(FILLS_ACC, SEED_FILLS);
+
+  const server = createApp(db).listen(0);
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}/api/fills/${FILLS_ACC}`;
+  try {
+    for (const q of ['offset=1.5', 'offset=Infinity', 'offset=1e999', 'offset=1e20', 'limit=1.5', 'limit=2.5', 'limit=abc', 'limit=-3']) {
+      const res = await fetch(`${base}?${q}`);
+      const json = await res.json();
+      assert.equal(res.status, 200, `${q} should not 500`);
+      assert.ok(Number.isSafeInteger(json.limit), `${q} -> limit ${json.limit} must be a safe integer`);
+      assert.ok(Number.isSafeInteger(json.offset), `${q} -> offset ${json.offset} must be a safe integer`);
+      assert.ok(json.limit >= 1 && json.limit <= 200, `${q} -> limit ${json.limit} out of range`);
+      assert.ok(json.offset >= 0, `${q} -> offset ${json.offset} negative`);
+    }
+    // repeated params arrive as an array; Number([]) is NaN -> defaults
+    const rep = await (await fetch(`${base}?limit=1&limit=2`)).json();
+    assert.equal(rep.limit, 50);
+  } finally { server.close(); }
 });

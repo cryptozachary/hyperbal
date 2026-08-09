@@ -6,6 +6,13 @@ import { assembleAccount } from './account.js';
 import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
 
+// Query params are untrusted strings (or arrays, for repeated params). Coerce to a
+// finite integer, falling back to `dflt` for anything that isn't one.
+function toSafeInt(v, dflt) {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) ? n : dflt;
+}
+
 export function createApp(db, overrides = {}) {
   const app = express();
   app.use(express.json());
@@ -38,8 +45,10 @@ export function createApp(db, overrides = {}) {
     const address = String(req.params.address || '').toLowerCase();
     if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
     // Clamp server-side so a hand-crafted request can't ask for the whole table.
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    // Must land on a safe integer: SQLite rejects fractional/Infinity/oversized
+    // LIMIT-OFFSET bindings, which would surface as an unhandled 500.
+    const limit = Math.min(200, Math.max(1, toSafeInt(req.query.limit, 50) || 50));
+    const offset = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, toSafeInt(req.query.offset, 0)));
     const closesOnly = req.query.closesOnly === 'true';
     res.json({
       address,
