@@ -137,6 +137,9 @@ function resetDashboard() {
   $('emptyState').classList.remove('hidden');
   $('agentsPanel').innerHTML = '';
   $('walletBadge').classList.add('hidden');
+  // Keep the filter buttons in sync with the closesOnly reset above.
+  $('fillsClosesBtn').classList.remove('active');
+  $('fillsAllBtn').classList.add('active');
   renderFills();
   drawChart();
   clearError();
