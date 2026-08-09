@@ -1,0 +1,54 @@
+{
+  "planPath": "docs/superpowers/plans/2026-08-09-trade-history-and-wallet-deletion.md",
+  "specPath": "docs/superpowers/specs/2026-08-09-trade-history-and-wallet-deletion-design.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Store fill direction (dir)",
+      "status": "pending",
+      "description": "**Goal:** Persist Hyperliquid's human-readable `dir` on every fill, with an additive migration for existing databases.\n\n**Files:**\n- Modify: db.js (SCHEMA, migration block, insertFill, ingestTxn)\n- Modify: hyperliquid.js:80-94 (normalizeFills)\n- Test: test/db.test.js, test/hyperliquid.test.js\n\n**Acceptance Criteria:**\n- [ ] Fresh databases create `fills` with a `dir TEXT` column\n- [ ] Pre-existing databases gain the column without losing rows\n- [ ] normalizeFills carries `dir` and yields null when absent\n- [ ] Callers that omit `dir` still insert successfully (ingestTxn defaults it)\n\n**Verify:** npm test\n\n**Steps:** write failing tests -> add dir to SCHEMA -> PRAGMA table_info migration -> update insertFill + ingestTxn default -> normalizeFills carries dir -> green -> commit\n\n```json:metadata\n{\"files\": [\"db.js\", \"hyperliquid.js\", \"test/db.test.js\", \"test/hyperliquid.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"fresh DB has fills.dir\", \"migration preserves existing rows\", \"normalizeFills carries dir, null when absent\", \"ingestFills defaults dir for callers that omit it\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Paginated fill queries",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Add listFills and countFills to the db handle, with stable ordering and a closes-only filter.\n\n**Files:**\n- Modify: db.js (prepared statements + returned methods)\n- Test: test/db.test.js\n\n**Acceptance Criteria:**\n- [ ] listFills orders by `ts DESC, tid DESC` so pagination is stable when timestamps collide\n- [ ] limit/offset page with no duplicated or skipped rows\n- [ ] closesOnly returns only rows with closed_pnl != 0\n- [ ] countFills agrees with unpaginated listFills under the same filter\n\n**Verify:** npm test\n\n**Steps:** write failing test -> add 4 prepared statements (all/closes x list/count) -> expose listFills/countFills -> green -> commit\n\n```json:metadata\n{\"files\": [\"db.js\", \"test/db.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"newest-first total ordering by ts DESC, tid DESC\", \"pagination covers each row once\", \"closesOnly filters to closed_pnl != 0\", \"countFills agrees with listFills\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: GET /api/fills/:address",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Expose the paginated fills query over HTTP with address validation and server-side clamping.\n\n**Files:**\n- Modify: server.js (route after /api/history/:address)\n- Test: test/server.test.js (route tests + fakeDb additions + withServer fills seed)\n\n**Acceptance Criteria:**\n- [ ] Invalid addresses return 400\n- [ ] limit defaults 50, clamps 1-200; offset defaults 0, clamps >= 0\n- [ ] closesOnly true only for the exact string \"true\"\n- [ ] Response is { address, fills, total, limit, offset }\n\n**Verify:** npm test\n\n**Steps:** extend fakeDb + withServer(fills seed as trailing default arg) -> write failing route tests -> add route -> green -> commit\n\n```json:metadata\n{\"files\": [\"server.js\", \"test/server.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"400 on invalid address\", \"limit/offset clamped server-side\", \"closesOnly exact-string match\", \"response shape { address, fills, total, limit, offset }\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Trade History panel UI",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Render stored fills in a paginated, filterable panel below Open Positions.\n\n**Files:**\n- Modify: public/index.html:36 (id on chart toggle), public/index.html:56 (new section)\n- Modify: public/styles.css (pager, direction column alignment)\n- Modify: public/app.js:175-179 (scope chart toggle selector) + state/fetch/render/wiring\n\n**Acceptance Criteria:**\n- [ ] Chart series toggle still works, unaffected by the new filter buttons (the `.toggle button` selector must be scoped to #chartToggle first)\n- [ ] Columns: Time, Coin, Direction, Size, Price, Fee, Realized PnL\n- [ ] Realized PnL uses pos/neg coloring, shows em dash for fills that closed nothing\n- [ ] Direction falls back to Buy/Sell from `side` for pre-migration rows\n- [ ] Closes-only toggle filters and resets to offset 0\n- [ ] Prev/next paginate; range reads X-Y of N; buttons disable at the ends\n- [ ] Selecting a different wallet reloads from offset 0\n\n**Verify:** npm start + browser check; npm test still passes\n\n**Steps:** scope chart toggle -> markup -> styles -> fills state -> render/load fns -> hook into refresh + selectAddress -> wire controls -> browser verify -> commit\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/styles.css\", \"public/app.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"chart toggle unaffected by new filter buttons\", \"seven columns render\", \"em dash for zero closed_pnl\", \"dir falls back to side\", \"closes-only resets offset\", \"pager range and disabled states correct\", \"wallet switch resets to page 1\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: Live-append new fills",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Push newly observed fills into the panel over the existing WebSocket without a refetch.\n\n**Files:**\n- Modify: ws-server.js:24-29 (rows ride along on the existing realized broadcast)\n- Modify: public/app.js (appendLiveFills + realized branch)\n- Test: test/hl-stream.test.js\n\n**Acceptance Criteria:**\n- [ ] One upstream fills event produces one downstream message\n- [ ] Rows already rendered are not duplicated (dedupe by tid)\n- [ ] Rows append only at offset 0 and only when matching the active filter\n- [ ] total increments by the count matching the ACTIVE FILTER, not every fresh fill\n- [ ] Appending respects limit so the page does not grow unbounded\n\n**Verify:** npm test; manually observe a live fill appear at the top\n\n**Steps:** pin broadcast contract test -> add fills to broadcast -> appendLiveFills -> hook realized branch -> green -> commit\n\n```json:metadata\n{\"files\": [\"ws-server.js\", \"public/app.js\", \"test/hl-stream.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"single downstream message per upstream event\", \"tid dedupe\", \"append only at offset 0 and matching filter\", \"total increments by filter-matching count only\", \"page re-sliced to limit\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: Purge on delete + stream.untrack",
+      "status": "pending",
+      "description": "**Goal:** Make wallet deletion remove snapshots and fills, stop the upstream subscription, and validate the address.\n\n**Files:**\n- Modify: db.js (deleteWallet transaction, replacing removeWallet)\n- Modify: hl-stream.js:73-75 (untrack)\n- Modify: server.js (destructure stream from overrides; DELETE route; reorder startup so the app gets the stream)\n- Test: test/db.test.js, test/hl-stream.test.js, test/server.test.js\n\n**Acceptance Criteria:**\n- [ ] deleteWallet removes from wallets, snapshots, fills in one transaction\n- [ ] Other wallets' data untouched\n- [ ] untrack sends unsubscribe and drops the address from the reconnect resubscribe set\n- [ ] DELETE rejects invalid addresses with 400\n- [ ] DELETE calls untrack when a stream is supplied, no-ops safely without one\n\n**Verify:** npm test\n\n**Note:** independent of tasks 1-5 except that the deleteWallet purge test calls countFills (task 2). Renames db.removeWallet -> db.deleteWallet; update the existing 'wallet upsert/list/remove' test and fakeDb.\n\n```json:metadata\n{\"files\": [\"db.js\", \"hl-stream.js\", \"server.js\", \"test/db.test.js\", \"test/hl-stream.test.js\", \"test/server.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"three-table transactional purge\", \"other wallets untouched\", \"untrack unsubscribes and clears reconnect set\", \"DELETE validates address\", \"DELETE untracks when stream present, no-ops otherwise\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 7: Delete UI + docs",
+      "status": "pending",
+      "blockedBy": [3, 5],
+      "description": "**Goal:** Make deletion discoverable and confirmed, and reset the dashboard when the last wallet is removed.\n\n**Files:**\n- Modify: public/index.html:16 (labeled delete control)\n- Modify: public/app.js:194-198 (confirm + post-delete reset)\n- Modify: README.md\n\n**Acceptance Criteria:**\n- [ ] Delete control has visible text, not a tooltip-only glyph\n- [ ] Confirmation names the wallet and states its history will be erased\n- [ ] Cancelling deletes nothing\n- [ ] After deleting the last wallet, cards/positions/chart/agents/badge/Trade History reset and status reads \"Enter a wallet\"\n- [ ] Deleting a non-selected wallet leaves the current view intact\n- [ ] README documents the panel and that deletion purges data (including the DEFAULT_WALLET caveat)\n\n**Verify:** npm start + browser check; npm test still passes\n\n**Note:** blockedBy task 4 because resetDashboard calls renderFills, and task 6 because the confirm text promises a purge the backend must actually perform.\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/app.js\", \"README.md\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"labeled delete control\", \"confirm names wallet and warns of erasure\", \"cancel is a no-op\", \"last-wallet delete resets every panel\", \"non-selected delete leaves view intact\", \"README documents panel + destructive delete + DEFAULT_WALLET caveat\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-08-09"
+}
