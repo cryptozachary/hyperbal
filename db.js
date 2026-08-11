@@ -91,6 +91,22 @@ export function openDb(dbPath) {
       INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, builder_fee, hash, oid, fee_token, ts)
       VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @builder_fee, @hash, @oid, @fee_token, @ts)
     `),
+    // The live path uses INSERT OR IGNORE — a duplicate there is nothing to do.
+    // Backfill wants the opposite: enrich rows that predate the newer columns.
+    // COALESCE(existing, incoming) fills gaps without overwriting what's recorded.
+    // Money columns are deliberately absent from DO UPDATE: a fill's economics are
+    // fixed once observed, and a sync must never silently rewrite them.
+    backfillFill: db.prepare(`
+      INSERT INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, builder_fee, hash, oid, fee_token, ts)
+      VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @builder_fee, @hash, @oid, @fee_token, @ts)
+      ON CONFLICT(address, tid) DO UPDATE SET
+        dir         = COALESCE(fills.dir,         excluded.dir),
+        builder_fee = COALESCE(fills.builder_fee, excluded.builder_fee),
+        hash        = COALESCE(fills.hash,        excluded.hash),
+        oid         = COALESCE(fills.oid,         excluded.oid),
+        fee_token   = COALESCE(fills.fee_token,   excluded.fee_token)
+    `),
+    countNullDir: db.prepare(`SELECT COUNT(*) AS n FROM fills WHERE address = ? AND dir IS NULL`),
     cumulativeRealized: db.prepare(`SELECT COALESCE(SUM(closed_pnl),0) AS total FROM fills WHERE address = ?`),
     listFillsAll: db.prepare(`
       SELECT tid, coin, closed_pnl, fee, px, sz, side, dir, ts FROM fills
@@ -124,6 +140,10 @@ export function openDb(dbPath) {
     for (const f of fills) stmts.insertFill.run({ address, ...FILL_DEFAULTS, ...f });
   });
 
+  const backfillTxn = db.transaction((address, rows) => {
+    for (const r of rows) stmts.backfillFill.run({ address, ...FILL_DEFAULTS, ...r });
+  });
+
   const ingestFundingTxn = db.transaction((address, rows) => {
     let inserted = 0;
     for (const r of rows) inserted += stmts.insertFunding.run({ address, ...r }).changes;
@@ -149,6 +169,20 @@ export function openDb(dbPath) {
     touchWallet(address) { stmts.touchWallet.run({ address, now: Date.now() }); },
     deleteWallet(address) { deleteWalletTxn(address); },
     ingestFills(address, fills) { if (fills?.length) ingestTxn(address, fills); },
+    // SQLite's upsert reports a change for both an insert and a no-op update, so
+    // counts are derived from before/after totals instead of from `changes`.
+    backfillFills(address, rows) {
+      if (!rows?.length) return { scanned: 0, inserted: 0, enriched: 0 };
+      const beforeTotal = stmts.countFillsAll.get(address).n;
+      const beforeNullDir = stmts.countNullDir.get(address).n;
+      backfillTxn(address, rows);
+      const afterTotal = stmts.countFillsAll.get(address).n;
+      const afterNullDir = stmts.countNullDir.get(address).n;
+      const inserted = afterTotal - beforeTotal;
+      // new rows arrive with a dir, so subtract them to leave only enriched ones
+      const enriched = Math.max(0, beforeNullDir - afterNullDir);
+      return { scanned: rows.length, inserted, enriched };
+    },
     cumulativeRealized(address) { return stmts.cumulativeRealized.get(address).total; },
     listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
       return (closesOnly ? stmts.listFillsCloses : stmts.listFillsAll).all(address, limit, offset);

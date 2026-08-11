@@ -214,3 +214,53 @@ test('migration adds via_agent to a pre-existing wallets table', async () => {
   assert.equal(rows[0].address, '0xold');
   assert.equal(rows[0].via_agent, null);
 });
+
+test('backfillFills enriches null columns without overwriting existing values', () => {
+  const db = freshDb();
+  // a legacy row: no dir, no builder_fee, no hash
+  db.ingestFills('0xabc', [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.33, px: 100, sz: 1, side: 'A', ts: 10 }]);
+  let row = db.raw.prepare(`SELECT * FROM fills WHERE tid = 1`).get();
+  assert.equal(row.dir, null);
+  assert.equal(row.builder_fee, null);
+
+  const res = db.backfillFills('0xabc', [
+    // same tid, now with the enriched fields, plus DIFFERENT money values
+    { tid: 1, coin: 'BTC', closed_pnl: 999, fee: 999, px: 999, sz: 999, side: 'A',
+      dir: 'Close Long', builder_fee: 0.23, hash: '0xdead', oid: 42, fee_token: 'USDC', ts: 10 },
+    // a genuinely new row
+    { tid: 2, coin: 'ETH', closed_pnl: 1, fee: 0.1, px: 50, sz: 2, side: 'B',
+      dir: 'Open Long', builder_fee: 0.05, hash: '0xbeef', oid: 43, fee_token: 'USDC', ts: 20 },
+  ]);
+
+  assert.equal(res.scanned, 2);
+  assert.equal(res.inserted, 1, 'only tid 2 is new');
+  assert.equal(res.enriched, 1, 'tid 1 gained a dir');
+
+  row = db.raw.prepare(`SELECT * FROM fills WHERE tid = 1`).get();
+  assert.equal(row.dir, 'Close Long', 'null dir filled in');
+  assert.equal(row.builder_fee, 0.23);
+  assert.equal(row.hash, '0xdead');
+  assert.equal(row.oid, 42);
+  // the economics of an observed fill must never be rewritten by a later sync
+  assert.equal(row.closed_pnl, 5);
+  assert.equal(row.fee, 0.33);
+  assert.equal(row.px, 100);
+  assert.equal(row.sz, 1);
+});
+
+test('backfillFills does not overwrite an already-populated dir', () => {
+  const db = freshDb();
+  db.ingestFills('0xabc', [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1,
+    side: 'A', dir: 'Close Long', ts: 10 }]);
+  const res = db.backfillFills('0xabc', [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1,
+    side: 'A', dir: 'WRONG', builder_fee: 0.2, hash: '0xaa', oid: 1, fee_token: 'USDC', ts: 10 }]);
+  const row = db.raw.prepare(`SELECT * FROM fills WHERE tid = 1`).get();
+  assert.equal(row.dir, 'Close Long', 'existing value wins');
+  assert.equal(row.builder_fee, 0.2, 'but a null column is still filled');
+  assert.equal(res.enriched, 0, 'dir was already set, so nothing was enriched');
+});
+
+test('backfillFills on an empty list is a no-op', () => {
+  const db = freshDb();
+  assert.deepEqual(db.backfillFills('0xabc', []), { scanned: 0, inserted: 0, enriched: 0 });
+});
