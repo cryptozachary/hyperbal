@@ -18,6 +18,8 @@ function fakeDb(fills = []) {
     touchWallet() {},
     deleteWallet(address) { const i = wallets.findIndex((w) => w.address === address); if (i >= 0) wallets.splice(i, 1); },
     ingestFills() {}, cumulativeRealized() { return 0; },
+    ingestFunding() { return 0; }, listFunding() { return []; },
+    backfillFills() { return { scanned: 0, inserted: 0, enriched: 0 }; },
     getHistory() { return []; }, insertSnapshotThrottled() { return false; },
     listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
       return fills.filter((f) => match(f, closesOnly))
@@ -202,6 +204,46 @@ test('GET /api/fills rejects an invalid address', async () => {
   await withServer({}, async (base) => {
     const res = await fetch(`${base}/api/fills/nope`);
     assert.equal(res.status, 400);
+  });
+});
+
+test('POST /api/backfill rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/backfill/nope`, { method: 'POST' });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('POST /api/backfill returns counts for a watched wallet', async () => {
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userRole') return { ok: true, json: async () => ({ role: 'user' }) };
+    if (b.type === 'userFillsByTime') return { ok: true, json: async () => ([]) };
+    if (b.type === 'userFunding') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    await fetch(`${base}/api/wallets`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: MASTER }) });
+    const res = await fetch(`${base}/api/backfill/${MASTER}`, { method: 'POST' });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.address, MASTER);
+    assert.equal(json.truncated, false);
+  });
+});
+
+test('POST /api/backfill returns 502 when Hyperliquid fails', async () => {
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userRole') return { ok: true, json: async () => ({ role: 'user' }) };
+    return { ok: false, status: 500, text: async () => 'boom' };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    await fetch(`${base}/api/wallets`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: MASTER }) });
+    const res = await fetch(`${base}/api/backfill/${MASTER}`, { method: 'POST' });
+    assert.equal(res.status, 502);
   });
 });
 

@@ -1,8 +1,9 @@
 import express from 'express';
 import { config } from './config.js';
 import { openDb } from './db.js';
-import { isValidAddress, resolveAccountAddress, getExtraAgents, normalizeExtraAgents } from './hyperliquid.js';
+import { isValidAddress, resolveAccountAddress, getExtraAgents, normalizeExtraAgents, normalizeFills, normalizeFunding, getUserFillsByTime, getUserFunding } from './hyperliquid.js';
 import { assembleAccount } from './account.js';
+import { backfillWallet } from './backfill.js';
 import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
 
@@ -72,6 +73,20 @@ export function createApp(db, overrides = {}) {
       res.json({ wallets: db.listWallets(), resolved: { entered, ...resolved } });
     } catch (err) {
       res.status(500).json({ error: `Failed to add wallet: ${err.message}` });
+    }
+  });
+
+  app.post('/api/backfill/:address', async (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    try {
+      const result = await backfillWallet(address, db, {
+        fetchFills: async (since) => normalizeFills(await getUserFillsByTime(address, opts, since)).rows,
+        fetchFunding: async (since) => normalizeFunding(await getUserFunding(address, opts, since)),
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({ error: `Backfill failed: ${err.message}` });
     }
   });
 
