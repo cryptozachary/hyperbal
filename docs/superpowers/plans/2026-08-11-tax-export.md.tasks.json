@@ -1,0 +1,61 @@
+{
+  "planPath": "docs/superpowers/plans/2026-08-11-tax-export.md",
+  "specPath": "docs/superpowers/specs/2026-08-11-tax-export-design.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Widen fills with the dropped columns",
+      "status": "pending",
+      "description": "**Goal:** Stop discarding builderFee, hash, oid and feeToken on ingest.\n\n**Files:**\n- Modify: db.js (SCHEMA, migration, insertFill, ingestTxn + FILL_DEFAULTS)\n- Modify: hyperliquid.js (normalizeFills)\n- Test: test/db.test.js, test/hyperliquid.test.js\n\n**Acceptance Criteria:**\n- [ ] Fresh DBs create fills with builder_fee, hash, oid, fee_token\n- [ ] Pre-existing DBs gain all four without losing rows\n- [ ] Migration is data-driven (replaces the one-off dir migration)\n- [ ] normalizeFills carries all four, tolerates absence; absent builderFee is 0 not null\n- [ ] Callers omitting the new keys still insert (FILL_DEFAULTS)\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"db.js\", \"hyperliquid.js\", \"test/db.test.js\", \"test/hyperliquid.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"four columns on fresh DB\", \"additive migration preserves rows\", \"data-driven migration loop\", \"normalizeFills carries all four\", \"FILL_DEFAULTS keeps old callers working\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: funding table",
+      "status": "pending",
+      "description": "**Goal:** Store funding payments, currently not recorded anywhere.\n\n**Files:**\n- Modify: db.js (SCHEMA funding table, statements, ingestFunding/listFunding, purge on delete)\n- Modify: hyperliquid.js (normalizeFunding, getUserFunding, getUserFillsByTime)\n- Test: test/db.test.js, test/hyperliquid.test.js\n\n**Acceptance Criteria:**\n- [ ] funding table with PK (address, ts, coin)\n- [ ] normalizeFunding flattens delta; drops non-funding types and malformed rows\n- [ ] Re-ingest inserts nothing; ingestFunding returns inserted count\n- [ ] listFunding range is half-open\n- [ ] deleteWallet purges funding\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"db.js\", \"hyperliquid.js\", \"test/db.test.js\", \"test/hyperliquid.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"PK dedupes funding\", \"normalizeFunding flattens and filters\", \"ingestFunding returns inserted count\", \"half-open listFunding range\", \"deleteWallet purges funding\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: backfillFills enrichment upsert",
+      "status": "pending",
+      "blockedBy": [0, 1],
+      "description": "**Goal:** A write path that fills NULL columns on existing rows, which INSERT OR IGNORE cannot do.\n\n**Files:**\n- Modify: db.js (backfillFill statement, backfillTxn, backfillFills method)\n- Test: test/db.test.js\n\n**Acceptance Criteria:**\n- [ ] New fill inserts normally\n- [ ] Existing NULL dir/builder_fee/hash/oid/fee_token get filled via COALESCE\n- [ ] Already-populated values are NOT overwritten\n- [ ] Money columns (closed_pnl, fee, px, sz) never rewritten\n- [ ] Returns { scanned, inserted, enriched }; counts derived from before/after totals because SQLite reports a change for no-op DO UPDATE\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"db.js\", \"test/db.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"COALESCE fills nulls\", \"existing values preserved\", \"money columns immutable\", \"scanned/inserted/enriched counts correct\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: backfill.js + backfill route",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Page through Hyperliquid history without skipping same-millisecond rows or looping forever.\n\n**Files:**\n- Create: backfill.js, test/backfill.test.js\n- Modify: server.js (POST /api/backfill/:address), test/server.test.js\n\n**Acceptance Criteria:**\n- [ ] Advances cursor TO newest ts, not +1 (same-ms rows not skipped)\n- [ ] Terminates on a page yielding no new rows; one retry when the page brought rows but the cursor couldn't advance\n- [ ] Idempotent second run inserts nothing\n- [ ] 50-page ceiling sets truncated: true\n- [ ] Gates on db.hasWallet -> { skipped: true } so a backfill can't resurrect a deleted wallet\n- [ ] Fetchers injected; tests need no network\n\n**Verify:** npm test\n\n**Note:** pagination loop verified against all 6 scenarios by prototype before the plan was written.\n\n```json:metadata\n{\"files\": [\"backfill.js\", \"server.js\", \"test/backfill.test.js\", \"test/server.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"cursor advances TO newest\", \"terminates on no-new-rows\", \"idempotent\", \"page ceiling reports truncated\", \"hasWallet gate\", \"injected fetchers\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: export.js CSV generation",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Turn stored fills and funding into two CSV shapes, correctly escaped and chronologically merged.\n\n**Files:**\n- Create: export.js, test/export.test.js\n\n**Acceptance Criteria:**\n- [ ] toCsv quotes fields with comma/quote/newline, doubles internal quotes (RFC 4180, CRLF)\n- [ ] Fills and funding merge chronologically\n- [ ] Funding rows carry no explorer URL (zero-filled hash)\n- [ ] Real hashes produce https://app.hyperliquid.xyz/explorer/tx/<hash>\n- [ ] Full numeric precision, no display rounding\n- [ ] Empty dataset yields header only\n- [ ] time_local honours the IANA tz, falls back on an invalid one\n- [ ] buildPreamble records wallet, range, timezone, not-tax-advice note\n\n**Verify:** npm test\n\n**Note:** escaping, preamble, and tz output verified by prototype before the plan was written.\n\n```json:metadata\n{\"files\": [\"export.js\", \"test/export.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"RFC4180 escaping\", \"chronological merge\", \"funding has no link\", \"explorer URL for real hashes\", \"precision preserved\", \"header-only when empty\", \"tz-aware local time\", \"preamble content\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: export and range routes",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Serve the CSVs as downloads and report the data span for the year picker.\n\n**Files:**\n- Modify: db.js (listFillsRange, getRange), server.js (two routes)\n- Test: test/db.test.js, test/server.test.js, test/export.test.js (reconciliation)\n\n**Acceptance Criteria:**\n- [ ] text/csv with Content-Disposition filename\n- [ ] format=detailed|koinly differ; anything else 400\n- [ ] from/to half-open; omitting both exports everything\n- [ ] Invalid address 400\n- [ ] GET /api/range returns { minTs, maxTs } across fills AND funding\n- [ ] Detailed CSV carries the # preamble; Koinly starts at its header\n- [ ] RECONCILIATION: CSV column sums equal direct SQL sums over the same range\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"db.js\", \"server.js\", \"test/db.test.js\", \"test/server.test.js\", \"test/export.test.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"csv content-type and disposition\", \"format validation\", \"half-open range\", \"range spans both tables\", \"preamble on detailed only\", \"totals reconcile with SQL\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 7: Export panel UI",
+      "status": "pending",
+      "blockedBy": [3, 5],
+      "description": "**Goal:** Year picker, two download buttons, and a sync button.\n\n**Files:**\n- Modify: public/index.html, public/app.js, public/styles.css\n\n**Acceptance Criteria:**\n- [ ] Year dropdown lists only years present, newest first, plus All time\n- [ ] Year bounds computed in the BROWSER's timezone, sent as epoch ms + tz\n- [ ] Both buttons trigger a download with a sensible filename\n- [ ] Sync reports inserted/enriched counts and says so when truncated\n- [ ] Controls disabled with no wallet; cleared by resetDashboard\n- [ ] Koinly caveat visible next to its button\n\n**Verify:** npm test; node --check public/app.js; browser smoke per Step 5\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/app.js\", \"public/styles.css\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"year list from data\", \"local-tz bounds sent explicitly\", \"downloads fire\", \"sync reports counts and truncation\", \"disabled/cleared states\", \"visible Koinly caveat\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 8: README",
+      "status": "pending",
+      "blockedBy": [6],
+      "description": "**Goal:** Document the export, funding capture, and coverage limits.\n\n**Files:**\n- Modify: README.md\n\n**Acceptance Criteria:**\n- [ ] Features cover export, funding capture, sync\n- [ ] New endpoints (userFillsByTime, userFunding) listed\n- [ ] Limitations state plainly: transaction data, NOT tax advice; no lot matching; no deposits/withdrawals\n- [ ] Limitations state coverage is bounded by what Hyperliquid still serves\n- [ ] Koinly file documented as best-effort\n\n**Verify:** npm test\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"features documented\", \"endpoints listed\", \"not-tax-advice stated plainly\", \"coverage bound stated\", \"Koinly best-effort stated\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-08-11"
+}
