@@ -38,6 +38,15 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
 - **Trade history** — a paginated table of every fill this dashboard has observed
   (time, coin, direction, size, price, fee, realized PnL), with a **closes only**
   filter. New fills append live.
+- **Funding payments** — captured alongside fills and included in exports. On perps
+  these are a real cash flow, often more numerous than the trades themselves.
+- **CSV export for tax** — download a full transaction record for a calendar year
+  or all time, with each trade linked to its transaction on the Hyperliquid
+  explorer. A Koinly-shaped file is also offered.
+- **Sync full history** — pulls everything Hyperliquid still serves via
+  `userFillsByTime` and `userFunding`, filling in direction, builder fees, and
+  transaction hashes on rows recorded before those were captured. Idempotent —
+  safe to re-run.
 - Clear loading, empty, and error states. Positive/negative PnL coloring.
 - Responsive (desktop + mobile).
 
@@ -122,6 +131,10 @@ All public, read-only:
     account state (the main dex omits `dex`).
   - `{ "type": "meta", "dex": "<name>" }` + `{ "type": "spotMeta" }` — resolve each
     dex's collateral token to a symbol.
+  - `{ "type": "userFillsByTime", "user": "0x…", "startTime": … }` — paginated
+    historical fills, used by **Sync full history**.
+  - `{ "type": "userFunding", "user": "0x…", "startTime": … }` — the funding
+    payment ledger.
 - **WebSocket** `{HL_WS_URL}`
   - `webData2` — live account state (positions, equity, unrealized PnL).
   - `userFills` — live trade fills as they happen.
@@ -138,15 +151,23 @@ All public, read-only:
 - **Realized PnL** is computed by summing `closedPnl` across trade fills. Fills are
   deduped by Hyperliquid trade id (`tid`) in SQLite, so the cumulative total keeps
   accumulating over time.
+- **Builder fees are separate from exchange fees.** Hyperliquid returns both `fee`
+  and `builderFee`; both are stored and both appear in exports. An absent
+  `builderFee` is stored as unknown rather than zero, so a later sync can fill it
+  in.
+- **Funding** is flattened from `userFunding`'s nested `delta` and deduped on
+  `(address, timestamp, coin)`, since the endpoint returns no unique id per entry.
 
 ## Limitations
 
-- **Cumulative realized PnL is "since this dashboard began observing your fills."**
-  Hyperliquid only returns a limited window of recent fills. This app stores every
-  fill it sees (via the live `userFills` stream and REST calls) and dedupes them,
-  so the total grows over time — but fills that occurred **before** you first ran
-  the dashboard, or that scrolled out of Hyperliquid's window before being
-  observed, are not included. It is **not** a complete lifetime realized PnL.
+- **Cumulative realized PnL is "since this dashboard began observing your fills" —
+  unless you run Sync full history.** Hyperliquid only returns a limited window of
+  recent fills via the live `userFills` stream and REST calls, so by default the
+  total only grows from first observation onward. The **Sync full history** button
+  pages back through `userFillsByTime` and `userFunding` and can recover fills and
+  funding from before you added the wallet, but only as far back as Hyperliquid
+  still serves them — anything that aged out of that window first is gone for
+  good. It is still **not** guaranteed to be a complete lifetime realized PnL.
 - **Nothing is stored for a wallet that isn't on your saved list.** Fills, equity
   snapshots, and the wallet entry itself are only written for wallets added via
   the **Add** field (or `DEFAULT_WALLET`). Viewing an address the dashboard
@@ -167,11 +188,30 @@ All public, read-only:
   USDT-margined pairs in some wallets' "Perps" tabs (Bitget's own engine) — are a
   different venue and cannot appear here.
 - **Deleting a wallet erases its stored data.** Removing a wallet purges its
-  observed fills and equity snapshots along with the wallet entry. Because
-  realized PnL is cumulative since first observation and Hyperliquid only serves
-  a limited recent-fills window, this history cannot be rebuilt by re-adding the
-  wallet. Note that a wallet set via `DEFAULT_WALLET` is re-added (empty) on the
-  next page load — clear the env var to stop that.
+  observed fills, funding, and equity snapshots along with the wallet entry.
+  Re-adding it and running **Sync full history** recovers whatever Hyperliquid
+  still serves, but equity snapshots are gone for good (they're a local
+  observation, not something Hyperliquid replays), and any fills or funding that
+  had already aged out of Hyperliquid's window before deletion are gone too. Note
+  that a wallet set via `DEFAULT_WALLET` is re-added (empty) on the next page
+  load — clear the env var to stop that.
+- **The export is transaction data, not tax advice.** It reports what happened:
+  fills, fees, funding, and realized PnL, with a link to each on-chain trade. How
+  perpetuals are characterised, which lots match, and what is reportable are
+  decisions for you or your preparer. Cost-basis lot matching is not attempted,
+  and deposits, withdrawals, and transfers are not included.
+- **Export coverage is bounded by what Hyperliquid still serves.** **Sync full
+  history** pulls everything currently available, but anything that aged out of
+  Hyperliquid's window before your first sync cannot be recovered. Reconcile the
+  totals against your own records — every trade row carries an explorer link so
+  you can.
+- **The Koinly file is best-effort.** Koinly's generic CSV assumes you acquired
+  and disposed of a held asset; a perp fill is neither, so realized PnL is mapped
+  as a bare USDC inflow or outflow with no cost basis. The detailed CSV is the
+  file to hand a preparer. Verify the Koinly file before importing.
+- **Funding rows carry no explorer link.** Funding settles as an internal ledger
+  event rather than an on-chain transaction, so Hyperliquid reports a zero-filled
+  hash for it. Trade rows all carry a working link.
 - Single-user, no authentication — intended to run locally on your own machine.
 
 ## Security
@@ -193,6 +233,8 @@ config.js          Env config (dotenv) with defaults
 db.js              SQLite: schema + wallet/snapshot/fill queries
 hyperliquid.js     HL REST client + normalizers + address validation
 account.js         Assembles the normalized account payload (REST path)
+backfill.js        Paginated history sync (fills + funding) from Hyperliquid
+export.js          CSV generation: detailed and Koinly row builders
 hl-stream.js       Upstream WebSocket client to Hyperliquid
 ws-server.js       Browser-facing WebSocket hub (/ws)
 public/
