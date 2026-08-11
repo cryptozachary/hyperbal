@@ -99,6 +99,22 @@ export function normalizeFills(fills) {
   return { rows, recentRealized };
 }
 
+// userFunding -> DB rows. The payload nests the interesting fields under `delta`,
+// and the same endpoint carries non-funding ledger events we don't store.
+export function normalizeFunding(entries) {
+  const arr = Array.isArray(entries) ? entries : [];
+  return arr
+    .filter((e) => e?.delta?.type === 'funding')
+    .map((e) => ({
+      ts: parseNum(e.time),
+      coin: e.delta.coin ?? null,
+      usdc: parseNum(e.delta.usdc) ?? 0,
+      funding_rate: parseNum(e.delta.fundingRate),
+      szi: parseNum(e.delta.szi),
+    }))
+    .filter((r) => Number.isFinite(r.ts) && r.coin);
+}
+
 // Convenience wrappers used by server/stream.
 // `dex`: null/omitted for the main perp dex, or a builder dex name string.
 export function getClearinghouseState(address, opts, dex) {
@@ -108,6 +124,12 @@ export function getClearinghouseState(address, opts, dex) {
 }
 export function getUserFills(address, opts) {
   return fetchInfo({ type: 'userFills', user: address }, opts);
+}
+export function getUserFunding(address, opts, startTime = 0) {
+  return fetchInfo({ type: 'userFunding', user: address, startTime }, opts);
+}
+export function getUserFillsByTime(address, opts, startTime = 0) {
+  return fetchInfo({ type: 'userFillsByTime', user: address, startTime }, opts);
 }
 
 export function getUserRole(address, opts) {

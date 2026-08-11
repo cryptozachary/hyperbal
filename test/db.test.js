@@ -173,6 +173,32 @@ test('ingestFills stores the new columns and defaults them when omitted', () => 
   assert.equal(rows[1].hash, null);
 });
 
+test('funding dedupes on (address, ts, coin) and reports inserted count', () => {
+  const db = freshDb();
+  const rows = [
+    { ts: 100, coin: 'BTC', usdc: -0.5, funding_rate: 0.0000125, szi: 2 },
+    { ts: 100, coin: 'ETH', usdc: 0.25, funding_rate: 0.00001, szi: 1 },  // same ts, different coin
+    { ts: 200, coin: 'BTC', usdc: -0.6, funding_rate: 0.0000125, szi: 2 },
+  ];
+  assert.equal(db.ingestFunding('0xabc', rows), 3);
+  assert.equal(db.ingestFunding('0xabc', rows), 0, 're-ingest must insert nothing');
+  assert.equal(db.listFunding('0xabc').length, 3);
+  assert.equal(db.listFunding('0xabc', 150, 300).length, 1, 'range is half-open');
+  // scoped per address
+  db.ingestFunding('0xbbb', [{ ts: 100, coin: 'BTC', usdc: -9, funding_rate: 0, szi: 1 }]);
+  assert.equal(db.listFunding('0xabc').length, 3);
+});
+
+test('deleteWallet purges funding too', () => {
+  const db = freshDb();
+  db.upsertWallet('0xabc', 'w');
+  db.ingestFunding('0xabc', [{ ts: 100, coin: 'BTC', usdc: -0.5, funding_rate: 0, szi: 1 }]);
+  db.ingestFills('0xabc', [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', ts: 10 }]);
+  db.deleteWallet('0xabc');
+  assert.equal(db.listFunding('0xabc').length, 0);
+  assert.equal(db.countFills('0xabc'), 0);
+});
+
 test('migration adds via_agent to a pre-existing wallets table', async () => {
   const Database = (await import('better-sqlite3')).default;
   const p = path.join(os.tmpdir(), `hl-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidAddress, normalizeAccount, normalizeFills, parseNum, fetchInfo,
+import { isValidAddress, normalizeAccount, normalizeFills, normalizeFunding, parseNum, fetchInfo,
   getUserRole, getExtraAgents, resolveAccountAddress, normalizeExtraAgents,
   getPerpDexs, getDexCollateral, mergeAccounts, _resetDexCaches } from '../hyperliquid.js';
 
@@ -86,6 +86,24 @@ test('normalizeFills carries builderFee, hash, oid and feeToken', () => {
   assert.equal(rows[1].hash, null);
   assert.equal(rows[1].oid, null);
   assert.equal(rows[1].fee_token, null);
+});
+
+test('normalizeFunding flattens delta and drops non-funding or malformed entries', () => {
+  const rows = normalizeFunding([
+    { time: 100, delta: { type: 'funding', coin: 'BTC', usdc: '-0.5', fundingRate: '0.0000125', szi: '2.0' } },
+    { time: 200, delta: { type: 'funding', coin: 'ETH', usdc: '1.25', fundingRate: '-0.00001', szi: '-3.0' } },
+    { time: 300, delta: { type: 'deposit', usdc: '100' } },        // wrong type
+    { time: 400, delta: { type: 'funding', usdc: '1' } },          // no coin
+    { delta: { type: 'funding', coin: 'SOL', usdc: '1' } },        // no time
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], { ts: 100, coin: 'BTC', usdc: -0.5, funding_rate: 0.0000125, szi: 2 });
+  assert.equal(rows[1].usdc, 1.25);
+});
+
+test('normalizeFunding tolerates a non-array', () => {
+  assert.deepEqual(normalizeFunding(null), []);
+  assert.deepEqual(normalizeFunding(undefined), []);
 });
 
 test('fetchInfo throws on non-ok', async () => {

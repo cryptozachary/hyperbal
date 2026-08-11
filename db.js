@@ -37,6 +37,15 @@ CREATE TABLE IF NOT EXISTS fills (
   ts INTEGER,
   PRIMARY KEY (address, tid)
 );
+CREATE TABLE IF NOT EXISTS funding (
+  address TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  coin TEXT NOT NULL,
+  usdc REAL,
+  funding_rate REAL,
+  szi REAL,
+  PRIMARY KEY (address, ts, coin)
+);
 `;
 
 export function openDb(dbPath) {
@@ -77,6 +86,7 @@ export function openDb(dbPath) {
     removeWallet: db.prepare(`DELETE FROM wallets WHERE address = ?`),
     removeSnapshots: db.prepare(`DELETE FROM snapshots WHERE address = ?`),
     removeFills: db.prepare(`DELETE FROM fills WHERE address = ?`),
+    removeFunding: db.prepare(`DELETE FROM funding WHERE address = ?`),
     insertFill: db.prepare(`
       INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, builder_fee, hash, oid, fee_token, ts)
       VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @builder_fee, @hash, @oid, @fee_token, @ts)
@@ -98,6 +108,14 @@ export function openDb(dbPath) {
       VALUES (@address, @ts, @equity, @unrealized_pnl, @realized_pnl_cum, @open_positions)
     `),
     getHistory: db.prepare(`SELECT ts, equity, unrealized_pnl, realized_pnl_cum, open_positions FROM snapshots WHERE address = ? AND ts >= ? ORDER BY ts ASC`),
+    insertFunding: db.prepare(`
+      INSERT OR IGNORE INTO funding (address, ts, coin, usdc, funding_rate, szi)
+      VALUES (@address, @ts, @coin, @usdc, @funding_rate, @szi)
+    `),
+    listFunding: db.prepare(`
+      SELECT ts, coin, usdc, funding_rate, szi FROM funding
+      WHERE address = ? AND ts >= ? AND ts < ? ORDER BY ts ASC, coin ASC
+    `),
   };
 
   const FILL_DEFAULTS = { dir: null, builder_fee: null, hash: null, oid: null, fee_token: null };
@@ -106,12 +124,19 @@ export function openDb(dbPath) {
     for (const f of fills) stmts.insertFill.run({ address, ...FILL_DEFAULTS, ...f });
   });
 
+  const ingestFundingTxn = db.transaction((address, rows) => {
+    let inserted = 0;
+    for (const r of rows) inserted += stmts.insertFunding.run({ address, ...r }).changes;
+    return inserted;
+  });
+
   // One transaction so a mid-delete failure can't leave a wallet whose row is
   // gone but whose fills and snapshots remain.
   const deleteWalletTxn = db.transaction((address) => {
     stmts.removeWallet.run(address);
     stmts.removeSnapshots.run(address);
     stmts.removeFills.run(address);
+    stmts.removeFunding.run(address);
   });
 
   return {
@@ -132,6 +157,9 @@ export function openDb(dbPath) {
       return (closesOnly ? stmts.countFillsCloses : stmts.countFillsAll).get(address).n;
     },
     getHistory(address, since = 0) { return stmts.getHistory.all(address, since); },
+    // Returns the number of rows actually inserted (duplicates are ignored).
+    ingestFunding(address, rows) { return rows?.length ? ingestFundingTxn(address, rows) : 0; },
+    listFunding(address, from = 0, to = Number.MAX_SAFE_INTEGER) { return stmts.listFunding.all(address, from, to); },
     // Returns true if a snapshot was written, false if throttled.
     insertSnapshotThrottled(address, point, minIntervalMs) {
       const last = stmts.lastSnapshotTs.get(address).ts;
