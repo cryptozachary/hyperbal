@@ -81,6 +81,28 @@
     </section>
 
     <section class="panel">
+      <div class="panel-head">
+        <h2>Export</h2>
+        <button id="syncBtn" title="Fetch full history from Hyperliquid" disabled>↻ Sync full history</button>
+      </div>
+      <div class="export-row">
+        <label for="exportYear">Period</label>
+        <select id="exportYear" disabled></select>
+        <button id="exportDetailedBtn" disabled>Detailed CSV</button>
+        <button id="exportKoinlyBtn" disabled>Koinly CSV</button>
+      </div>
+      <div id="syncResult" class="export-note"></div>
+      <p class="export-note">
+        Detailed CSV is the full record — every fill and funding payment, with a link to
+        each trade on the Hyperliquid explorer. The Koinly file is a best-effort mapping:
+        perps don't fit Koinly's buy/sell model cleanly, so check it before importing.
+        Records begin when this dashboard first observed the wallet — run
+        <strong>Sync full history</strong> to pull everything Hyperliquid still serves.
+        This is transaction data, not tax advice.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Connected Agent Wallets</h2>
       <div id="agentsPanel" class="agents"></div>
     </section>

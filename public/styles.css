@@ -65,3 +65,10 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
 .pager-range{color:var(--muted);font-size:12px;min-width:120px;text-align:center}
 /* Direction reads as a label, not a number — left-align it like Time and Coin. */
 #fills th:nth-child(3),#fills td:nth-child(3){text-align:left}
+.export-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.export-row label{color:var(--muted);font-size:12px}
+.export-note{color:var(--muted);font-size:12px;margin:10px 0 0;line-height:1.6}
+.export-note strong{color:var(--text)}
+/* Custom button colors override the UA's disabled greying — restate it here so a
+   disabled export control actually looks disabled. Matches the pager. */
+.export-row select:disabled,.export-row button:disabled,#syncBtn:disabled{opacity:.4;cursor:default;border-color:var(--line)}
