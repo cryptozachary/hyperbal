@@ -141,7 +141,13 @@ export function createApp(db, overrides = {}) {
       const result = await backfillWallet(address, db, {
         fillsFrom: clampEpoch(toSafeInt(req.query.fillsFrom, 0)),
         fundingFrom: clampEpoch(toSafeInt(req.query.fundingFrom, 0)),
-        fetchFills: async (since) => normalizeFills(await getUserFillsByTime(address, opts, since)).rows,
+        // The backfill's source is the authoritative historical record, so an
+        // omitted builderFee here means no builder took a cut — a definite 0, not
+        // the "unknown" the live path records. Resolving it at this one boundary
+        // keeps NULL meaning "never confirmed" everywhere else, which is what lets
+        // the COALESCE upsert repair it.
+        fetchFills: async (since) => normalizeFills(await getUserFillsByTime(address, opts, since))
+          .rows.map((r) => ({ ...r, builder_fee: r.builder_fee ?? 0 })),
         fetchFunding: async (since) => normalizeFunding(await getUserFunding(address, opts, since)),
       });
       res.json(result);

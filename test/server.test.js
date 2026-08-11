@@ -374,3 +374,38 @@ test('POST /api/backfill accepts resume cursors and returns the next ones', asyn
     assert.equal(json.funding.nextFrom, 6000);
   });
 });
+
+test('backfill resolves an absent builderFee to 0, not to unknown', async () => {
+  const { openDb } = await import('../db.js');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const db = openDb(path.join(os.tmpdir(), `hl-bfee-${Date.now()}-${Math.random().toString(16).slice(2)}.db`));
+  const A = '0x' + '7'.repeat(40);
+  db.upsertWallet(A, 'w');
+  // a legacy row with builder_fee unknown
+  db.ingestFills(A, [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', ts: 100 }]);
+
+  // Hyperliquid returns this fill with NO builderFee — it never routed through a builder
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userFillsByTime') {
+      return { ok: true, json: async () => (b.startTime > 100 ? [] : [
+        { tid: 1, coin: 'BTC', closedPnl: '5', fee: '0.1', px: '100', sz: '1',
+          side: 'A', dir: 'Close Long', hash: '0xa', oid: 9, feeToken: 'USDC', time: 100 },
+      ]) };
+    }
+    if (b.type === 'userFunding') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+
+  const server = createApp(db, { fetchImpl }).listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/backfill/${A}`, { method: 'POST' });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    const row = db.raw.prepare('SELECT builder_fee FROM fills WHERE tid = 1').get();
+    assert.equal(row.builder_fee, 0, 'an authoritative absence is 0, so it exports as 0 rather than blank');
+    assert.equal(json.fills.enriched, 1, 'and the row counts as fully repaired');
+  } finally { server.close(); }
+});
