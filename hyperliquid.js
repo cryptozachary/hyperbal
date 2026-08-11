@@ -88,6 +88,11 @@ export function normalizeFills(fills) {
     sz: parseNum(f.sz),
     side: f.side ?? null,
     dir: f.dir ?? null,
+    // An absent builderFee means no builder took a cut — that's 0, not unknown.
+    builder_fee: parseNum(f.builderFee) ?? 0,
+    hash: f.hash ?? null,
+    oid: parseNum(f.oid),
+    fee_token: f.feeToken ?? null,
     ts: parseNum(f.time),
   })).filter((r) => Number.isFinite(r.tid));
   const recentRealized = rows.reduce((s, r) => s + r.closed_pnl, 0);

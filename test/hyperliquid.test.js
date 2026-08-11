@@ -71,6 +71,23 @@ test('normalizeFills carries dir and tolerates its absence', () => {
   assert.equal(rows[1].dir, null);
 });
 
+test('normalizeFills carries builderFee, hash, oid and feeToken', () => {
+  const { rows } = normalizeFills([
+    { tid: 1, coin: 'BTC', closedPnl: '5', fee: '0.33', builderFee: '0.23', px: '100', sz: '1',
+      side: 'A', dir: 'Close Long', hash: '0xabc', oid: 42, feeToken: 'USDC', time: 10 },
+    { tid: 2, coin: 'ETH', closedPnl: '0', fee: '0.1', px: '50', sz: '2', side: 'B', time: 20 },
+  ]);
+  assert.equal(rows[0].builder_fee, 0.23);
+  assert.equal(rows[0].hash, '0xabc');
+  assert.equal(rows[0].oid, 42);
+  assert.equal(rows[0].fee_token, 'USDC');
+  // absent builderFee means no builder took a cut, which is 0 — not unknown
+  assert.equal(rows[1].builder_fee, 0);
+  assert.equal(rows[1].hash, null);
+  assert.equal(rows[1].oid, null);
+  assert.equal(rows[1].fee_token, null);
+});
+
 test('fetchInfo throws on non-ok', async () => {
   const fakeFetch = async () => ({ ok: false, status: 500, text: async () => 'boom' });
   await assert.rejects(() => fetchInfo({ type: 'x' }, { fetchImpl: fakeFetch, apiUrl: 'http://x' }), /Hyperliquid API error 500/);

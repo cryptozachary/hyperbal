@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS fills (
   sz REAL,
   side TEXT,
   dir TEXT,
+  builder_fee REAL,
+  hash TEXT,
+  oid INTEGER,
+  fee_token TEXT,
   ts INTEGER,
   PRIMARY KEY (address, tid)
 );
@@ -48,10 +52,11 @@ export function openDb(dbPath) {
     db.exec(`ALTER TABLE wallets ADD COLUMN via_agent TEXT`);
   }
 
-  // Migration: add fills.dir to DBs created before trade-history support.
-  const fillCols = db.prepare(`PRAGMA table_info(fills)`).all();
-  if (!fillCols.some((c) => c.name === 'dir')) {
-    db.exec(`ALTER TABLE fills ADD COLUMN dir TEXT`);
+  // Migration: add fills columns introduced after the original schema. Data-driven
+  // so each new column is one entry rather than another copy of this block.
+  const fillCols = db.prepare(`PRAGMA table_info(fills)`).all().map((c) => c.name);
+  for (const [name, type] of [['dir', 'TEXT'], ['builder_fee', 'REAL'], ['hash', 'TEXT'], ['oid', 'INTEGER'], ['fee_token', 'TEXT']]) {
+    if (!fillCols.includes(name)) db.exec(`ALTER TABLE fills ADD COLUMN ${name} ${type}`);
   }
 
   const stmts = {
@@ -73,8 +78,8 @@ export function openDb(dbPath) {
     removeSnapshots: db.prepare(`DELETE FROM snapshots WHERE address = ?`),
     removeFills: db.prepare(`DELETE FROM fills WHERE address = ?`),
     insertFill: db.prepare(`
-      INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, ts)
-      VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @ts)
+      INSERT OR IGNORE INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, dir, builder_fee, hash, oid, fee_token, ts)
+      VALUES (@address, @tid, @coin, @closed_pnl, @fee, @px, @sz, @side, @dir, @builder_fee, @hash, @oid, @fee_token, @ts)
     `),
     cumulativeRealized: db.prepare(`SELECT COALESCE(SUM(closed_pnl),0) AS total FROM fills WHERE address = ?`),
     listFillsAll: db.prepare(`
@@ -95,8 +100,10 @@ export function openDb(dbPath) {
     getHistory: db.prepare(`SELECT ts, equity, unrealized_pnl, realized_pnl_cum, open_positions FROM snapshots WHERE address = ? AND ts >= ? ORDER BY ts ASC`),
   };
 
+  const FILL_DEFAULTS = { dir: null, builder_fee: null, hash: null, oid: null, fee_token: null };
+
   const ingestTxn = db.transaction((address, fills) => {
-    for (const f of fills) stmts.insertFill.run({ address, dir: null, ...f });
+    for (const f of fills) stmts.insertFill.run({ address, ...FILL_DEFAULTS, ...f });
   });
 
   // One transaction so a mid-delete failure can't leave a wallet whose row is

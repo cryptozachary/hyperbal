@@ -137,6 +137,42 @@ test('listFills is scoped to one address', () => {
   assert.equal(db.listFills('0xaaa', { limit: 50, offset: 0 })[0].coin, 'BTC');
 });
 
+test('migration adds all fills columns to a pre-existing table', async () => {
+  const Database = (await import('better-sqlite3')).default;
+  const p = path.join(os.tmpdir(), `hl-cols-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
+  const old = new Database(p);
+  old.exec(`CREATE TABLE fills (address TEXT NOT NULL, tid INTEGER NOT NULL, coin TEXT,
+    closed_pnl REAL, fee REAL, px REAL, sz REAL, side TEXT, ts INTEGER, PRIMARY KEY (address, tid))`);
+  old.prepare(`INSERT INTO fills (address, tid, coin, closed_pnl, fee, px, sz, side, ts)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run('0xold', 1, 'BTC', 5, 0.1, 100, 1, 'B', 10);
+  old.close();
+
+  const db = openDb(p);
+  const cols = db.raw.prepare(`PRAGMA table_info(fills)`).all().map((c) => c.name);
+  for (const c of ['dir', 'builder_fee', 'hash', 'oid', 'fee_token']) {
+    assert.ok(cols.includes(c), `missing column ${c}`);
+  }
+  const row = db.raw.prepare(`SELECT * FROM fills WHERE address = ?`).get('0xold');
+  assert.equal(row.tid, 1);
+  assert.equal(row.closed_pnl, 5, 'existing data must survive the migration');
+  assert.equal(row.builder_fee, null);
+});
+
+test('ingestFills stores the new columns and defaults them when omitted', () => {
+  const db = freshDb();
+  db.ingestFills('0xabc', [
+    { tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.33, builder_fee: 0.23, px: 100, sz: 1,
+      side: 'A', dir: 'Close Long', hash: '0xabc', oid: 42, fee_token: 'USDC', ts: 10 },
+    { tid: 2, coin: 'ETH', closed_pnl: 0, fee: 0.1, px: 50, sz: 2, side: 'B', ts: 20 },
+  ]);
+  const rows = db.raw.prepare(`SELECT * FROM fills WHERE address = ? ORDER BY tid`).all('0xabc');
+  assert.equal(rows[0].builder_fee, 0.23);
+  assert.equal(rows[0].hash, '0xabc');
+  assert.equal(rows[0].oid, 42);
+  assert.equal(rows[1].builder_fee, null);
+  assert.equal(rows[1].hash, null);
+});
+
 test('migration adds via_agent to a pre-existing wallets table', async () => {
   const Database = (await import('better-sqlite3')).default;
   const p = path.join(os.tmpdir(), `hl-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
