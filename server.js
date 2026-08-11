@@ -6,7 +6,7 @@ import { assembleAccount } from './account.js';
 import { backfillWallet } from './backfill.js';
 import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
-import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, DETAILED_COLUMNS, KOINLY_COLUMNS } from './export.js';
+import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, isValidTimeZone, DETAILED_COLUMNS, KOINLY_COLUMNS } from './export.js';
 
 // Query params are untrusted strings (or arrays, for repeated params). Coerce to a
 // finite integer, falling back to `dflt` for anything that isn't one.
@@ -14,6 +14,10 @@ function toSafeInt(v, dflt) {
   const n = Math.trunc(Number(v));
   return Number.isFinite(n) ? n : dflt;
 }
+
+// The widest epoch the ECMAScript Date can represent; beyond it toISOString throws.
+const MAX_EPOCH_MS = 8.64e15;
+const clampEpoch = (n) => Math.min(MAX_EPOCH_MS, Math.max(-MAX_EPOCH_MS, n));
 
 export function createApp(db, overrides = {}) {
   const app = express();
@@ -77,9 +81,17 @@ export function createApp(db, overrides = {}) {
     }
     // Bounds are computed client-side from the browser's timezone and sent as
     // explicit epoch ms, so server and client can't disagree on where a year starts.
-    const from = toSafeInt(req.query.from, 0);
-    const to = toSafeInt(req.query.to, Number.MAX_SAFE_INTEGER);
+    // Clamped into the range Date accepts: toSafeInt only guarantees finite, and an
+    // out-of-range epoch makes toISOString throw inside the preamble — a 500 with a
+    // stack trace rather than a CSV.
+    const from = clampEpoch(toSafeInt(req.query.from, 0));
+    const to = clampEpoch(toSafeInt(req.query.to, MAX_EPOCH_MS));
+    // Reject a bogus zone instead of silently formatting in UTC while the preamble
+    // claims otherwise — the file's whole job is to be self-describing.
     const tz = String(req.query.tz || 'UTC');
+    if (!isValidTimeZone(tz)) {
+      return res.status(400).json({ error: `Unknown timezone "${tz}". Expected an IANA name such as "America/New_York".` });
+    }
 
     const fills = db.listFillsRange(address, from, to);
     const funding = db.listFunding(address, from, to);
@@ -125,7 +137,10 @@ export function createApp(db, overrides = {}) {
     const address = String(req.params.address || '').toLowerCase();
     if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
     try {
+      // Resume cursors from a previous truncated run; absent on a first sync.
       const result = await backfillWallet(address, db, {
+        fillsFrom: clampEpoch(toSafeInt(req.query.fillsFrom, 0)),
+        fundingFrom: clampEpoch(toSafeInt(req.query.fundingFrom, 0)),
         fetchFills: async (since) => normalizeFills(await getUserFillsByTime(address, opts, since)).rows,
         fetchFunding: async (since) => normalizeFunding(await getUserFunding(address, opts, since)),
       });

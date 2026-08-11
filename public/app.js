@@ -8,6 +8,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const state = {
   address: null, ws: null, pollTimer: null, refreshTimer: null, fillsReloadTimer: null,
   series: 'equity', history: [], wsConnected: false, walletMeta: {},
+  syncResume: {}, // address -> { fills, funding } cursors from a truncated sync
   fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false },
 };
 
@@ -155,18 +156,29 @@ async function syncHistory() {
   $('syncBtn').disabled = true;
   out.textContent = 'Syncing from Hyperliquid…';
   try {
-    const r = await api(`/api/backfill/${state.address}`, { method: 'POST' });
+    // Resume where a previous truncated run stopped. Without carrying these the
+    // next run would restart at 0, re-scan what it already has, and stop in the
+    // same place — so "run again to continue" would be a lie.
+    const resume = state.syncResume[state.address];
+    const q = resume ? `?fillsFrom=${resume.fills}&fundingFrom=${resume.funding}` : '';
+    const r = await api(`/api/backfill/${state.address}${q}`, { method: 'POST' });
     if (r.skipped) {
       out.textContent = 'Nothing synced — this wallet is not on your saved list.';
+      delete state.syncResume[state.address];
     } else {
-      // `enriched` counts fills that gained a direction, not rows generally touched.
+      // `enriched` counts pre-existing fills that gained a missing field.
       const bits = [
         `${r.fills.inserted} new fills`,
-        `${r.fills.enriched} directions filled in`,
+        `${r.fills.enriched} existing fills completed`,
         `${r.funding.inserted} funding entries`,
       ];
+      if (r.truncated) {
+        state.syncResume[state.address] = { fills: r.fills.nextFrom, funding: r.funding.nextFrom };
+      } else {
+        delete state.syncResume[state.address];
+      }
       out.textContent = `Synced: ${bits.join(', ')}.` +
-        (r.truncated ? ' Stopped at the page limit — run again to continue.' : '');
+        (r.truncated ? ' Stopped at the page limit — click again to continue from here.' : '');
     }
     await loadFills();
     await loadExportYears();

@@ -36,35 +36,51 @@ async function pageForward(fetchPage, ingest, from, maxPages) {
     if (pageInserted === 0) break;
   }
 
-  return { scanned, inserted, pages, truncated };
+  // `cursor` is returned so a truncated run can be resumed from where it stopped.
+  // Without it a re-run restarts at 0, burns the same page budget on rows it
+  // already has, and stops at exactly the same place — forever.
+  return { scanned, inserted, pages, truncated, cursor };
 }
 
-// opts: { fetchFills, fetchFunding, from = 0, maxPages = MAX_PAGES }
+// Each endpoint keeps its own cursor: one can truncate while the other completes,
+// and resuming both from a single shared value would skip the completed one's tail.
+// opts: { fetchFills, fetchFunding, fillsFrom = 0, fundingFrom = 0, maxPages = MAX_PAGES }
 export async function backfillWallet(address, db, opts) {
-  const { fetchFills, fetchFunding, from = 0, maxPages = MAX_PAGES } = opts;
+  const { fetchFills, fetchFunding, fillsFrom = 0, fundingFrom = 0, maxPages = MAX_PAGES } = opts;
+
+  const skippedResult = {
+    address, skipped: true,
+    fills: { scanned: 0, inserted: 0, enriched: 0, nextFrom: fillsFrom },
+    funding: { scanned: 0, inserted: 0, nextFrom: fundingFrom },
+    truncated: false,
+  };
 
   // Same invariant as everywhere else: nothing is persisted for a wallet that
   // isn't on the watch list, so a backfill can't resurrect a deleted one.
-  if (!db.hasWallet(address)) {
-    return { address, skipped: true, fills: { scanned: 0, inserted: 0, enriched: 0 },
-      funding: { scanned: 0, inserted: 0 }, from, truncated: false };
-  }
+  if (!db.hasWallet(address)) return skippedResult;
 
   let enriched = 0;
+  // Re-checked inside each ingest rather than only up front: the wallet can be
+  // deleted while this is awaiting a page, and writing after that would resurrect
+  // exactly what the purge removed.
   const fills = await pageForward(fetchFills, (rows) => {
+    if (!db.hasWallet(address)) return 0;
     const r = db.backfillFills(address, rows);
     enriched += r.enriched;
     return r.inserted;
-  }, from, maxPages);
+  }, fillsFrom, maxPages);
 
-  const funding = await pageForward(fetchFunding, (rows) => db.ingestFunding(address, rows), from, maxPages);
+  const funding = await pageForward(fetchFunding, (rows) => (
+    db.hasWallet(address) ? db.ingestFunding(address, rows) : 0
+  ), fundingFrom, maxPages);
+
+  if (!db.hasWallet(address)) return skippedResult;
 
   return {
     address,
     skipped: false,
-    fills: { scanned: fills.scanned, inserted: fills.inserted, enriched },
-    funding: { scanned: funding.scanned, inserted: funding.inserted },
-    from,
+    fills: { scanned: fills.scanned, inserted: fills.inserted, enriched, nextFrom: fills.cursor },
+    funding: { scanned: funding.scanned, inserted: funding.inserted, nextFrom: funding.cursor },
     truncated: fills.truncated || funding.truncated,
   };
 }

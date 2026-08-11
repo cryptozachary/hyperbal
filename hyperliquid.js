@@ -88,13 +88,20 @@ export function normalizeFills(fills) {
     sz: parseNum(f.sz),
     side: f.side ?? null,
     dir: f.dir ?? null,
-    // An absent builderFee means no builder took a cut — that's 0, not unknown.
-    builder_fee: parseNum(f.builderFee) ?? 0,
+    // NULL, not 0, when absent. 0 is a real value that COALESCE treats as known,
+    // which would permanently block the backfill from ever repairing this column —
+    // on the one field this whole feature exists to stop losing. Readers coalesce
+    // to 0 at display time instead.
+    builder_fee: parseNum(f.builderFee),
     hash: f.hash ?? null,
     oid: parseNum(f.oid),
     fee_token: f.feeToken ?? null,
     ts: parseNum(f.time),
-  })).filter((r) => Number.isFinite(r.tid));
+    // A row with no usable ts stores ts = NULL, which every range query silently
+    // excludes (NULL >= n is NULL) — it would count toward the dashboard's totals
+    // while being absent from every export. Drop it rather than let the headline
+    // number disagree with the tax file.
+  })).filter((r) => Number.isFinite(r.tid) && Number.isFinite(r.ts));
   const recentRealized = rows.reduce((s, r) => s + r.closed_pnl, 0);
   return { rows, recentRealized };
 }

@@ -334,3 +334,43 @@ test('GET /api/range rejects an invalid address', async () => {
     assert.equal((await fetch(`${base}/api/range/nope`)).status, 400);
   });
 });
+
+// --- regressions from the backend review ---
+
+test('GET /api/export survives an out-of-range from/to instead of 500ing', async () => {
+  await withServer({}, async (base) => {
+    for (const q of ['from=9000000000000000', 'from=1e30', 'to=-1e30']) {
+      const res = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=UTC&${q}`);
+      assert.equal(res.status, 200, `${q} should not 500`);
+      assert.match(res.headers.get('content-type'), /text\/csv/);
+    }
+  }, SEED_FILLS);
+});
+
+test('GET /api/export rejects a bogus timezone rather than silently using UTC', async () => {
+  await withServer({}, async (base) => {
+    const bad = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=Not/AZone`);
+    assert.equal(bad.status, 400);
+    const injected = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=${encodeURIComponent('UTC\r\nINJECTED,row,here')}`);
+    assert.equal(injected.status, 400, 'a newline-bearing tz must not reach the preamble');
+  }, SEED_FILLS);
+});
+
+test('POST /api/backfill accepts resume cursors and returns the next ones', async () => {
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userRole') return { ok: true, json: async () => ({ role: 'user' }) };
+    if (b.type === 'userFillsByTime' || b.type === 'userFunding') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    await fetch(`${base}/api/wallets`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: MASTER }) });
+    const res = await fetch(`${base}/api/backfill/${MASTER}?fillsFrom=5000&fundingFrom=6000`, { method: 'POST' });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    // an empty first page leaves each cursor where it started, so a resume is a no-op
+    assert.equal(json.fills.nextFrom, 5000);
+    assert.equal(json.funding.nextFrom, 6000);
+  });
+});

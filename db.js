@@ -106,7 +106,13 @@ export function openDb(dbPath) {
         oid         = COALESCE(fills.oid,         excluded.oid),
         fee_token   = COALESCE(fills.fee_token,   excluded.fee_token)
     `),
-    countNullDir: db.prepare(`SELECT COUNT(*) AS n FROM fills WHERE address = ? AND dir IS NULL`),
+    // Rows still missing at least one of the columns the backfill can repair.
+    // Counting only `dir` would under-report: since dir capture shipped, new rows
+    // all have one, so a builder-fee repair — the money column — would score zero.
+    countIncomplete: db.prepare(`
+      SELECT COUNT(*) AS n FROM fills WHERE address = ?
+        AND (dir IS NULL OR builder_fee IS NULL OR hash IS NULL OR oid IS NULL OR fee_token IS NULL)
+    `),
     cumulativeRealized: db.prepare(`SELECT COALESCE(SUM(closed_pnl),0) AS total FROM fills WHERE address = ?`),
     listFillsAll: db.prepare(`
       SELECT tid, coin, closed_pnl, fee, px, sz, side, dir, ts FROM fills
@@ -180,13 +186,15 @@ export function openDb(dbPath) {
     backfillFills(address, rows) {
       if (!rows?.length) return { scanned: 0, inserted: 0, enriched: 0 };
       const beforeTotal = stmts.countFillsAll.get(address).n;
-      const beforeNullDir = stmts.countNullDir.get(address).n;
+      const beforeIncomplete = stmts.countIncomplete.get(address).n;
       backfillTxn(address, rows);
       const afterTotal = stmts.countFillsAll.get(address).n;
-      const afterNullDir = stmts.countNullDir.get(address).n;
+      const afterIncomplete = stmts.countIncomplete.get(address).n;
       const inserted = afterTotal - beforeTotal;
-      // new rows arrive with a dir, so subtract them to leave only enriched ones
-      const enriched = Math.max(0, beforeNullDir - afterNullDir);
+      // Pre-existing rows that went from missing something to complete. Floored at
+      // 0 because a newly inserted row that is itself incomplete raises the after
+      // count; that under-reports rather than going negative.
+      const enriched = Math.max(0, beforeIncomplete - afterIncomplete);
       return { scanned: rows.length, inserted, enriched };
     },
     cumulativeRealized(address) { return stmts.cumulativeRealized.get(address).total; },

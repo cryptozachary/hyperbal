@@ -16,25 +16,65 @@ export const KOINLY_COLUMNS = [
   'Label', 'Description', 'TxHash',
 ];
 
+// A spreadsheet treats a cell opening with one of these as a formula, so a coin
+// name is an injection vector into whatever the user opens this file with.
+const FORMULA_LEAD = /^[=+@\t\r]/;
+
+// String(0.0000001) is "1e-7". Exponential notation in a tax file reads as
+// corruption and defeats naive decimal parsers, so render small magnitudes in
+// fixed notation. This changes the TEXT, never the value: toFixed(20) is exact
+// well past the precision of anything Hyperliquid reports, and trailing zeros
+// are stripped rather than rounded away.
+function numCell(n) {
+  const s = String(n);
+  if (!/e/i.test(s)) return s;
+  if (!Number.isFinite(n)) return s;
+  return n.toFixed(20).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 // RFC 4180: quote anything containing a comma, quote or newline; double internal
 // quotes. Builder dexes name their own markets, so don't assume coin names stay
-// comma-free.
+// comma-free — or formula-free.
 function csvCell(v) {
   if (v == null) return '';
-  const s = String(v);
+  // Numbers are generated here, never user-supplied, so they skip the formula
+  // guard — otherwise every negative PnL would be quoted into a text cell.
+  if (typeof v === 'number') return numCell(v);
+  let s = String(v);
+  if (FORMULA_LEAD.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const isoUtc = (ts) => new Date(ts).toISOString();
+// Callers can pass an out-of-range epoch; Date.toISOString throws on those rather
+// than returning something useless, which would surface as an unhandled 500.
+function isoUtc(ts) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
 
 // 'sv-SE' yields a sortable "YYYY-MM-DD HH:mm:ss" rather than a locale-specific
 // format, which matters for a file someone will sort in a spreadsheet. An invalid
 // IANA name throws, so fall back rather than failing the whole export.
 function localTime(ts, tz) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
   try {
-    return new Date(ts).toLocaleString('sv-SE', { timeZone: tz });
+    return d.toLocaleString('sv-SE', { timeZone: tz });
   } catch {
-    return new Date(ts).toLocaleString('sv-SE', { timeZone: 'UTC' });
+    return d.toLocaleString('sv-SE', { timeZone: 'UTC' });
+  }
+}
+
+// True only for a timezone Intl actually accepts. The route uses this to reject a
+// bogus zone rather than silently formatting in UTC while the file's preamble
+// claims otherwise — on a document whose purpose is being self-describing, a
+// quietly wrong timezone label is worse than an error.
+export function isValidTimeZone(tz) {
+  try {
+    new Date(0).toLocaleString('sv-SE', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -43,7 +83,10 @@ function localTime(ts, tz) {
 // `comment='#'`, R `comment.char='#'`). Used for the detailed export only; a
 // vendor import must start at the header row.
 export function toCsv(rows, columns, preamble = []) {
-  const lines = preamble.map((l) => `# ${l}`);
+  // Preamble content can carry user input (the timezone name). A newline inside it
+  // would break out of the comment block and be read as the header row, so flatten
+  // any line break rather than trusting the caller.
+  const lines = preamble.map((l) => `# ${String(l).replace(/[\r\n]+/g, ' ')}`);
   lines.push(columns.map(csvCell).join(','));
   for (const r of rows) lines.push(columns.map((c) => csvCell(r[c])).join(','));
   return lines.join('\r\n') + '\r\n';
@@ -82,7 +125,10 @@ export function buildDetailedRows(fills, funding, tz) {
       direction: f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : ''),
       size: f.sz ?? '',
       price: f.px ?? '',
-      notional: (f.px != null && f.sz != null) ? f.px * f.sz : '',
+      // Derived, not stored. Rounded to 8dp purely so float noise doesn't put
+      // "0.30000000000000004" in a tax document; the stored columns it's derived
+      // from are untouched, so reconciliation is unaffected.
+      notional: (f.px != null && f.sz != null) ? Number((f.px * f.sz).toFixed(8)) : '',
       fee: f.fee ?? '',
       builder_fee: f.builder_fee ?? '',
       fee_token: f.fee_token ?? '',
@@ -130,16 +176,21 @@ export function buildKoinlyRows(fills, funding, tz) {
 
   for (const f of fills) {
     const pnl = f.closed_pnl ?? 0;
+    // Maker rebates make the exchange fee negative. Koinly's Fee Amount can't
+    // express a credit, so fold a net-negative fee into the received side rather
+    // than emitting a negative fee it would reject or misread.
     const feeTotal = (f.fee ?? 0) + (f.builder_fee ?? 0);
+    const rebate = feeTotal < 0 ? -feeTotal : 0;
+    const received = (pnl > 0 ? pnl : 0) + rebate;
     rows.push({
       _ts: f.ts,
       Date: localTime(f.ts, tz),
       'Sent Amount': pnl < 0 ? Math.abs(pnl) : '',
       'Sent Currency': pnl < 0 ? 'USDC' : '',
-      'Received Amount': pnl > 0 ? pnl : '',
-      'Received Currency': pnl > 0 ? 'USDC' : '',
-      'Fee Amount': feeTotal || '',
-      'Fee Currency': feeTotal ? (f.fee_token || 'USDC') : '',
+      'Received Amount': received > 0 ? received : '',
+      'Received Currency': received > 0 ? 'USDC' : '',
+      'Fee Amount': feeTotal > 0 ? feeTotal : '',
+      'Fee Currency': feeTotal > 0 ? (f.fee_token || 'USDC') : '',
       'Net Worth Amount': '',
       'Net Worth Currency': '',
       Label: 'realized gain',

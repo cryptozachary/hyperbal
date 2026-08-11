@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, DETAILED_COLUMNS, KOINLY_COLUMNS } from '../export.js';
+import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, isValidTimeZone, DETAILED_COLUMNS, KOINLY_COLUMNS } from '../export.js';
 
 const FILL = { tid: 1, coin: 'BTC', closed_pnl: 12.5, fee: 0.331490, builder_fee: 0.231488,
   fee_token: 'USDC', px: 81224, sz: 0.00285, side: 'A', dir: 'Close Long',
@@ -168,4 +168,159 @@ test('detailed CSV totals reconcile with the source rows', async () => {
   assert.equal(sum('funding'), -0.00982);
   // the merged order is chronological across both tables
   assert.deepEqual(rows.map((r) => r.type), ['fill', 'funding', 'fill']);
+});
+
+// --- regressions from the backend review ---
+
+test('small magnitudes render in fixed notation, never exponential', () => {
+  const rows = buildDetailedRows(
+    [{ tid: 1, coin: 'BTC', closed_pnl: 0.00000012, fee: 1e-7, builder_fee: 0,
+       px: 100, sz: 1, side: 'A', dir: 'x', hash: '0xa', oid: 1, ts: 100 }],
+    [{ ts: 200, coin: 'ETH', usdc: -0.00000012, funding_rate: 0, szi: 1 }], 'UTC');
+  const csv = toCsv(rows, DETAILED_COLUMNS);
+  assert.ok(!/\de[+-]/i.test(csv), `exponential notation reached the file:\n${csv}`);
+  assert.match(csv, /0\.0000001,/);
+  assert.match(csv, /-0\.00000012/);
+});
+
+test('fixed notation preserves the value exactly', () => {
+  const rows = buildDetailedRows(
+    [{ tid: 1, coin: 'B', closed_pnl: 1.2e-7, fee: 0, builder_fee: 0, px: 1, sz: 1,
+       side: 'A', dir: 'x', hash: '', oid: 1, ts: 100 }], [], 'UTC');
+  const cell = toCsv(rows, DETAILED_COLUMNS).split('\r\n')[1].split(',')[12];
+  assert.equal(Number(cell), 1.2e-7, 'round-trips to the same double');
+});
+
+test('a formula-leading coin name is neutralised', () => {
+  const evil = '=HYPERLINK("http://evil","x")';
+  const rows = buildDetailedRows(
+    [{ tid: 1, coin: evil, closed_pnl: 1, fee: 0, builder_fee: 0, px: 1, sz: 1,
+       side: 'A', dir: '@SUM(A1)', hash: '', oid: 1, ts: 100 }], [], 'UTC');
+  const csv = toCsv(rows, DETAILED_COLUMNS);
+  // the cell is quoted and its internal quotes doubled, so match the escaped form
+  const escaped = `"'${evil.replace(/"/g, '""')}"`;
+  assert.ok(csv.includes(escaped), `coin not neutralised:\n${csv}`);
+  assert.ok(csv.includes("'@SUM(A1)"), 'direction not neutralised');
+  // negative numbers must NOT be quoted into text cells by the same guard
+  const neg = buildDetailedRows([{ tid: 2, coin: 'BTC', closed_pnl: -4.25, fee: 0,
+    builder_fee: 0, px: 1, sz: 1, side: 'A', dir: 'x', hash: '', oid: 1, ts: 100 }], [], 'UTC');
+  assert.match(toCsv(neg, DETAILED_COLUMNS), /,-4\.25,/);
+});
+
+test('a newline in the preamble cannot break out of the comment block', () => {
+  const csv = toCsv([{ a: 1 }], ['a'], ['timezone: UTC\r\nINJECTED,row,here']);
+  const lines = csv.split('\r\n');
+  assert.equal(lines[0], '# timezone: UTC INJECTED,row,here');
+  assert.equal(lines[1], 'a', 'header is still the first non-comment line');
+});
+
+test('an out-of-range epoch yields an empty cell rather than throwing', () => {
+  assert.doesNotThrow(() => buildPreamble({ address: '0xa', from: 9e15, to: null, tz: 'UTC', generatedAt: 0 }));
+  const rows = buildDetailedRows([{ tid: 1, coin: 'B', closed_pnl: 1, fee: 0, builder_fee: 0,
+    px: 1, sz: 1, side: 'A', dir: 'x', hash: '', oid: 1, ts: 9e15 }], [], 'UTC');
+  assert.equal(rows[0].time_utc, '');
+});
+
+test('isValidTimeZone accepts IANA names and rejects junk', () => {
+  assert.equal(isValidTimeZone('UTC'), true);
+  assert.equal(isValidTimeZone('America/New_York'), true);
+  assert.equal(isValidTimeZone('Not/AZone'), false);
+  assert.equal(isValidTimeZone('UTC\r\nINJECTED'), false);
+});
+
+test('koinly folds a maker rebate into received rather than a negative fee', () => {
+  const [row] = buildKoinlyRows([{ tid: 1, coin: 'BTC', closed_pnl: 10, fee: -0.05,
+    builder_fee: 0, fee_token: 'USDC', px: 1, sz: 1, side: 'A', dir: 'x', hash: '', oid: 1, ts: 100 }], [], 'UTC');
+  assert.equal(row['Fee Amount'], '', 'no negative fee reaches Koinly');
+  assert.equal(row['Received Amount'], 10.05, 'the rebate is credited instead');
+});
+
+test('a null builder_fee exports as empty, not as a fabricated zero', () => {
+  const [row] = buildDetailedRows([{ tid: 1, coin: 'BTC', closed_pnl: 1, fee: 0.1,
+    builder_fee: null, px: 1, sz: 1, side: 'A', dir: 'x', hash: '', oid: 1, ts: 100 }], [], 'UTC');
+  assert.equal(row.builder_fee, '', 'unknown must not read as "no builder fee charged"');
+});
+
+// Minimal RFC 4180 reader — deliberately not reusing anything from export.js, so a
+// bug in the writer can't cancel itself out against a matching bug in the reader.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; } else quoted = false;
+      } else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\r' && text[i + 1] === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; i++; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => !(r.length === 1 && r[0] === ''));
+}
+
+test('the emitted CSV TEXT reconciles with SQL over the same half-open range', async () => {
+  const { openDb } = await import('../db.js');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const db = openDb(path.join(os.tmpdir(), `hl-csvrecon-${Date.now()}-${Math.random().toString(16).slice(2)}.db`));
+  const A = '0x' + 'd'.repeat(40);
+  const FROM = 1000, TO = 2000;
+
+  db.ingestFills(A, [
+    { tid: 1, coin: 'BTC', closed_pnl: 12.5, fee: 0.33149, builder_fee: 0.231488, fee_token: 'USDC',
+      px: 81224, sz: 0.00285, side: 'A', dir: 'Close Long', hash: '0xa', oid: 1, ts: FROM },      // exactly on `from` — included
+    { tid: 2, coin: 'xyz:SP,500', closed_pnl: -4.25, fee: -0.05, builder_fee: 0.05, fee_token: 'USDC',
+      px: 3000, sz: 0.1, side: 'B', dir: 'Close Short', hash: '0xb', oid: 2, ts: 1500 },          // comma in coin, maker rebate
+    { tid: 3, coin: '=EVIL()', closed_pnl: 0.00000012, fee: 1e-7, builder_fee: null, fee_token: null,
+      px: 1, sz: 1, side: 'B', dir: null, hash: null, oid: null, ts: 1800 },                      // formula, sub-microdollar, legacy nulls
+    { tid: 4, coin: 'ETH', closed_pnl: 999, fee: 9, builder_fee: 9, fee_token: 'USDC',
+      px: 1, sz: 1, side: 'A', dir: 'x', hash: '0xd', oid: 4, ts: TO },                           // exactly on `to` — EXCLUDED
+  ]);
+  db.ingestFunding(A, [
+    { ts: 1200, coin: 'BTC', usdc: -0.00982, funding_rate: 0.0000125, szi: 130 },
+    { ts: 1900, coin: 'ETH', usdc: -0.00000012, funding_rate: 0.0000125, szi: 1 },
+    { ts: TO, coin: 'SOL', usdc: 500, funding_rate: 0, szi: 1 },                                  // on `to` — EXCLUDED
+  ]);
+
+  const fills = db.listFillsRange(A, FROM, TO);
+  const funding = db.listFunding(A, FROM, TO);
+  const csv = toCsv(buildDetailedRows(fills, funding, 'UTC'), DETAILED_COLUMNS);
+
+  const parsed = parseCsv(csv);
+  const header = parsed[0];
+  const body = parsed.slice(1);
+  const col = (r, name) => r[header.indexOf(name)];
+  const sumCol = (name) => body.reduce((s, r) => s + (Number(col(r, name)) || 0), 0);
+
+  assert.equal(body.length, 5, '3 fills + 2 funding; the rows on `to` are excluded');
+
+  // the numbers that would land on a tax return, read back out of the file itself
+  const sqlPnl = fills.reduce((s, f) => s + f.closed_pnl, 0);
+  const sqlFee = fills.reduce((s, f) => s + f.fee, 0);
+  const sqlBuilder = fills.reduce((s, f) => s + (f.builder_fee ?? 0), 0);
+  const sqlFunding = funding.reduce((s, f) => s + f.usdc, 0);
+  assert.ok(Math.abs(sumCol('realized_pnl') - sqlPnl) < 1e-12, `pnl ${sumCol('realized_pnl')} vs ${sqlPnl}`);
+  assert.ok(Math.abs(sumCol('fee') - sqlFee) < 1e-12, `fee ${sumCol('fee')} vs ${sqlFee}`);
+  assert.ok(Math.abs(sumCol('builder_fee') - sqlBuilder) < 1e-12, `builder ${sumCol('builder_fee')} vs ${sqlBuilder}`);
+  assert.ok(Math.abs(sumCol('funding') - sqlFunding) < 1e-12, `funding ${sumCol('funding')} vs ${sqlFunding}`);
+
+  // The excluded boundary rows really are absent, not merely summing to zero.
+  // Keyed on the timestamp rather than on a coin name or a substring: "xyz:SP,500"
+  // contains "500", and an in-range funding row also uses the coin ETH.
+  const onBound = new Date(TO).toISOString();
+  assert.ok(!body.some((r) => col(r, 'time_utc') === onBound), '`to` must be exclusive');
+  assert.ok(body.some((r) => col(r, 'time_utc') === new Date(FROM).toISOString()), '`from` must be inclusive');
+
+  // hostile values survived the round trip intact
+  const commaRow = body.find((r) => col(r, 'coin') === 'xyz:SP,500');
+  assert.ok(commaRow, 'comma-bearing coin did not survive parsing');
+  assert.equal(Number(col(commaRow, 'realized_pnl')), -4.25);
+  assert.ok(body.some((r) => col(r, 'coin') === "'=EVIL()"), 'formula guard missing on round trip');
+  assert.ok(!/\de[+-]/i.test(csv), 'exponential notation in the file');
+  // a legacy NULL builder_fee reads as blank, never as a fabricated 0
+  const legacy = body.find((r) => col(r, 'coin') === "'=EVIL()");
+  assert.equal(col(legacy, 'builder_fee'), '');
 });

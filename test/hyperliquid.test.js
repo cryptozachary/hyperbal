@@ -81,8 +81,9 @@ test('normalizeFills carries builderFee, hash, oid and feeToken', () => {
   assert.equal(rows[0].hash, '0xabc');
   assert.equal(rows[0].oid, 42);
   assert.equal(rows[0].fee_token, 'USDC');
-  // absent builderFee means no builder took a cut, which is 0 — not unknown
-  assert.equal(rows[1].builder_fee, 0);
+  // absent builderFee is UNKNOWN, not 0: storing 0 would make COALESCE treat it as
+  // known and permanently block the backfill from ever repairing this column
+  assert.equal(rows[1].builder_fee, null);
   assert.equal(rows[1].hash, null);
   assert.equal(rows[1].oid, null);
   assert.equal(rows[1].fee_token, null);

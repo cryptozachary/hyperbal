@@ -257,7 +257,9 @@ test('backfillFills does not overwrite an already-populated dir', () => {
   const row = db.raw.prepare(`SELECT * FROM fills WHERE tid = 1`).get();
   assert.equal(row.dir, 'Close Long', 'existing value wins');
   assert.equal(row.builder_fee, 0.2, 'but a null column is still filled');
-  assert.equal(res.enriched, 0, 'dir was already set, so nothing was enriched');
+  // enriched counts any repaired column, not just dir — a builder-fee repair is
+  // real money recovered and must not score zero just because dir was already set
+  assert.equal(res.enriched, 1, 'the row went from incomplete to complete');
 });
 
 test('backfillFills on an empty list is a no-op', () => {
