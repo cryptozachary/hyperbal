@@ -18,6 +18,8 @@ function fakeDb(fills = []) {
     touchWallet() {},
     deleteWallet(address) { const i = wallets.findIndex((w) => w.address === address); if (i >= 0) wallets.splice(i, 1); },
     ingestFills() {}, cumulativeRealized() { return 0; },
+    ingestFunding() { return 0; }, listFunding() { return []; },
+    backfillFills() { return { scanned: 0, inserted: 0, enriched: 0 }; },
     getHistory() { return []; }, insertSnapshotThrottled() { return false; },
     listFills(address, { limit = 50, offset = 0, closesOnly = false } = {}) {
       return fills.filter((f) => match(f, closesOnly))
@@ -26,6 +28,13 @@ function fakeDb(fills = []) {
     },
     countFills(_address, { closesOnly = false } = {}) {
       return fills.filter((f) => match(f, closesOnly)).length;
+    },
+    listFillsRange(_address, from = 0, to = Number.MAX_SAFE_INTEGER) {
+      return fills.filter((f) => f.ts >= from && f.ts < to).sort((a, b) => a.ts - b.ts);
+    },
+    getRange() {
+      if (!fills.length) return { minTs: null, maxTs: null };
+      return { minTs: Math.min(...fills.map((f) => f.ts)), maxTs: Math.max(...fills.map((f) => f.ts)) };
     },
   };
 }
@@ -205,6 +214,46 @@ test('GET /api/fills rejects an invalid address', async () => {
   });
 });
 
+test('POST /api/backfill rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/backfill/nope`, { method: 'POST' });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('POST /api/backfill returns counts for a watched wallet', async () => {
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userRole') return { ok: true, json: async () => ({ role: 'user' }) };
+    if (b.type === 'userFillsByTime') return { ok: true, json: async () => ([]) };
+    if (b.type === 'userFunding') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    await fetch(`${base}/api/wallets`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: MASTER }) });
+    const res = await fetch(`${base}/api/backfill/${MASTER}`, { method: 'POST' });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.address, MASTER);
+    assert.equal(json.truncated, false);
+  });
+});
+
+test('POST /api/backfill returns 502 when Hyperliquid fails', async () => {
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userRole') return { ok: true, json: async () => ({ role: 'user' }) };
+    return { ok: false, status: 500, text: async () => 'boom' };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    await fetch(`${base}/api/wallets`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: MASTER }) });
+    const res = await fetch(`${base}/api/backfill/${MASTER}`, { method: 'POST' });
+    assert.equal(res.status, 502);
+  });
+});
+
 // The fakeDb double slices a JS array, which tolerates 1.5 and Infinity — only a
 // real SQLite binding proves the clamp produces a usable integer.
 test('GET /api/fills survives non-integer limit/offset against a real DB', async () => {
@@ -230,5 +279,133 @@ test('GET /api/fills survives non-integer limit/offset against a real DB', async
     // repeated params arrive as an array; Number([]) is NaN -> defaults
     const rep = await (await fetch(`${base}?limit=1&limit=2`)).json();
     assert.equal(rep.limit, 50);
+  } finally { server.close(); }
+});
+
+test('GET /api/export returns a detailed CSV download with a preamble', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=UTC`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /text\/csv/);
+    assert.match(res.headers.get('content-disposition'), /attachment; filename=/);
+    const lines = (await res.text()).split('\r\n');
+    assert.ok(lines[0].startsWith('# Hyperliquid trade export'), lines[0]);
+    const header = lines.find((l) => !l.startsWith('#'));
+    assert.ok(header.startsWith('time_utc,time_local,type,coin'), header);
+  }, SEED_FILLS);
+});
+
+test('GET /api/export honours format=koinly and emits no preamble', async () => {
+  await withServer({}, async (base) => {
+    const body = await (await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=koinly&tz=UTC`)).text();
+    // A vendor import must start at the header row — no comment lines above it.
+    assert.ok(body.startsWith('Date,Sent Amount,Sent Currency'), body.slice(0, 80));
+  }, SEED_FILLS);
+});
+
+test('GET /api/export applies a half-open from/to range', async () => {
+  await withServer({}, async (base) => {
+    // SEED_FILLS are at ts 10, 20, 30
+    const body = await (await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=koinly&tz=UTC&from=10&to=30`)).text();
+    const dataRows = body.trim().split('\r\n').slice(1);
+    assert.equal(dataRows.length, 2, 'to is exclusive, so ts=30 is out');
+  }, SEED_FILLS);
+});
+
+test('GET /api/export rejects an unknown format and a bad address', async () => {
+  await withServer({}, async (base) => {
+    assert.equal((await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=turbotax`)).status, 400);
+    assert.equal((await fetch(`${base}/api/export/nope.csv?format=detailed`)).status, 400);
+  }, SEED_FILLS);
+});
+
+test('GET /api/range returns the data span', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/range/${FILLS_ACC}`);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.minTs, 10);
+    assert.equal(json.maxTs, 30);
+  }, SEED_FILLS);
+});
+
+test('GET /api/range rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    assert.equal((await fetch(`${base}/api/range/nope`)).status, 400);
+  });
+});
+
+// --- regressions from the backend review ---
+
+test('GET /api/export survives an out-of-range from/to instead of 500ing', async () => {
+  await withServer({}, async (base) => {
+    for (const q of ['from=9000000000000000', 'from=1e30', 'to=-1e30']) {
+      const res = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=UTC&${q}`);
+      assert.equal(res.status, 200, `${q} should not 500`);
+      assert.match(res.headers.get('content-type'), /text\/csv/);
+    }
+  }, SEED_FILLS);
+});
+
+test('GET /api/export rejects a bogus timezone rather than silently using UTC', async () => {
+  await withServer({}, async (base) => {
+    const bad = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=Not/AZone`);
+    assert.equal(bad.status, 400);
+    const injected = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=${encodeURIComponent('UTC\r\nINJECTED,row,here')}`);
+    assert.equal(injected.status, 400, 'a newline-bearing tz must not reach the preamble');
+  }, SEED_FILLS);
+});
+
+test('POST /api/backfill accepts resume cursors and returns the next ones', async () => {
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userRole') return { ok: true, json: async () => ({ role: 'user' }) };
+    if (b.type === 'userFillsByTime' || b.type === 'userFunding') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+  await withServer({ fetchImpl }, async (base) => {
+    await fetch(`${base}/api/wallets`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: MASTER }) });
+    const res = await fetch(`${base}/api/backfill/${MASTER}?fillsFrom=5000&fundingFrom=6000`, { method: 'POST' });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    // an empty first page leaves each cursor where it started, so a resume is a no-op
+    assert.equal(json.fills.nextFrom, 5000);
+    assert.equal(json.funding.nextFrom, 6000);
+  });
+});
+
+test('backfill resolves an absent builderFee to 0, not to unknown', async () => {
+  const { openDb } = await import('../db.js');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const db = openDb(path.join(os.tmpdir(), `hl-bfee-${Date.now()}-${Math.random().toString(16).slice(2)}.db`));
+  const A = '0x' + '7'.repeat(40);
+  db.upsertWallet(A, 'w');
+  // a legacy row with builder_fee unknown
+  db.ingestFills(A, [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', ts: 100 }]);
+
+  // Hyperliquid returns this fill with NO builderFee — it never routed through a builder
+  const fetchImpl = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.type === 'userFillsByTime') {
+      return { ok: true, json: async () => (b.startTime > 100 ? [] : [
+        { tid: 1, coin: 'BTC', closedPnl: '5', fee: '0.1', px: '100', sz: '1',
+          side: 'A', dir: 'Close Long', hash: '0xa', oid: 9, feeToken: 'USDC', time: 100 },
+      ]) };
+    }
+    if (b.type === 'userFunding') return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({}) };
+  };
+
+  const server = createApp(db, { fetchImpl }).listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/backfill/${A}`, { method: 'POST' });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    const row = db.raw.prepare('SELECT builder_fee FROM fills WHERE tid = 1').get();
+    assert.equal(row.builder_fee, 0, 'an authoritative absence is 0, so it exports as 0 rather than blank');
+    assert.equal(json.fills.enriched, 1, 'and the row counts as fully repaired');
   } finally { server.close(); }
 });

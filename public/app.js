@@ -8,6 +8,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const state = {
   address: null, ws: null, pollTimer: null, refreshTimer: null, fillsReloadTimer: null,
   series: 'equity', history: [], wsConnected: false, walletMeta: {},
+  syncResume: {}, // address -> { fills, funding } cursors from a truncated sync
   fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false },
 };
 
@@ -103,6 +104,91 @@ async function loadFills(retried = false) {
   } catch (err) { showError(err.message); }
 }
 
+// Year bounds are computed HERE, in the browser's timezone, and sent as explicit
+// epoch ms — so the server never has to guess where the user's year starts.
+function yearBounds(year) {
+  return { from: new Date(year, 0, 1).getTime(), to: new Date(year + 1, 0, 1).getTime() };
+}
+
+function setExportEnabled(on) {
+  for (const id of ['exportYear', 'exportDetailedBtn', 'exportKoinlyBtn', 'syncBtn']) $(id).disabled = !on;
+}
+
+async function loadExportYears() {
+  const sel = $('exportYear');
+  sel.innerHTML = '';
+  if (!state.address) { setExportEnabled(false); return; }
+  setExportEnabled(true);
+  try {
+    const { minTs, maxTs } = await api(`/api/range/${state.address}`);
+    const opts = [];
+    if (minTs != null && maxTs != null) {
+      const first = new Date(minTs).getFullYear();
+      const last = new Date(maxTs).getFullYear();
+      for (let y = last; y >= first; y--) opts.push({ value: String(y), text: String(y) });
+    }
+    opts.push({ value: 'all', text: 'All time' });
+    for (const o of opts) {
+      const el = document.createElement('option');
+      el.value = o.value; el.textContent = o.text;
+      sel.appendChild(el);
+    }
+  } catch { /* leave the picker empty; the download buttons will report the error */ }
+}
+
+function downloadExport(format) {
+  if (!state.address) return;
+  const sel = $('exportYear').value;
+  const params = new URLSearchParams({ format, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' });
+  if (sel && sel !== 'all') {
+    const { from, to } = yearBounds(Number(sel));
+    params.set('from', String(from));
+    params.set('to', String(to));
+    params.set('label', sel);
+  }
+  // Content-Disposition makes this a download rather than a navigation.
+  window.location = `/api/export/${state.address}.csv?${params}`;
+}
+
+async function syncHistory() {
+  if (!state.address) return;
+  const out = $('syncResult');
+  $('syncBtn').disabled = true;
+  out.textContent = 'Syncing from Hyperliquid…';
+  try {
+    // Resume where a previous truncated run stopped. Without carrying these the
+    // next run would restart at 0, re-scan what it already has, and stop in the
+    // same place — so "run again to continue" would be a lie.
+    const resume = state.syncResume[state.address];
+    const q = resume ? `?fillsFrom=${resume.fills}&fundingFrom=${resume.funding}` : '';
+    const r = await api(`/api/backfill/${state.address}${q}`, { method: 'POST' });
+    if (r.skipped) {
+      out.textContent = 'Nothing synced — this wallet is not on your saved list.';
+      delete state.syncResume[state.address];
+    } else {
+      // `enriched` counts pre-existing fills that gained a missing field.
+      const bits = [
+        `${r.fills.inserted} new fills`,
+        `${r.fills.enriched} existing fills completed`,
+        `${r.funding.inserted} funding entries`,
+      ];
+      if (r.truncated) {
+        state.syncResume[state.address] = { fills: r.fills.nextFrom, funding: r.funding.nextFrom };
+      } else {
+        delete state.syncResume[state.address];
+      }
+      out.textContent = `Synced: ${bits.join(', ')}.` +
+        (r.truncated ? ' Stopped at the page limit — click again to continue from here.' : '');
+    }
+    await loadFills();
+    await loadExportYears();
+  } catch (e) {
+    out.textContent = `Sync failed: ${e.message}`;
+  } finally {
+    $('syncBtn').disabled = false;
+  }
+}
+
 // New fills arrived. Re-read page 1 from the server rather than splicing them in:
 // the upstream userFills sub replays a snapshot on every reconnect, so a client-side
 // running total drifts and a blind prepend can push the genuinely-newest rows off
@@ -136,6 +222,9 @@ function resetDashboard() {
   $('emptyState').classList.remove('hidden');
   $('agentsPanel').innerHTML = '';
   $('walletBadge').classList.add('hidden');
+  $('exportYear').innerHTML = '';
+  $('syncResult').textContent = '';
+  setExportEnabled(false);
   // Keep the filter buttons in sync with the closesOnly reset above.
   $('fillsClosesBtn').classList.remove('active');
   $('fillsAllBtn').classList.add('active');
@@ -262,6 +351,7 @@ async function selectAddress(address) {
   renderWalletBadge(address);
   await refresh(true);
   await loadAgents(address);
+  await loadExportYears();
   if (state.wsConnected) state.ws.send(JSON.stringify({ type: 'watch', address }));
 }
 
@@ -293,6 +383,10 @@ async function init() {
       loadFills();
     }
   });
+
+  $('exportDetailedBtn').addEventListener('click', () => downloadExport('detailed'));
+  $('exportKoinlyBtn').addEventListener('click', () => downloadExport('koinly'));
+  $('syncBtn').addEventListener('click', syncHistory);
 
   $('refreshBtn').addEventListener('click', () => refresh(true));
   window.addEventListener('resize', drawChart);

@@ -88,10 +88,38 @@ export function normalizeFills(fills) {
     sz: parseNum(f.sz),
     side: f.side ?? null,
     dir: f.dir ?? null,
+    // NULL, not 0, when absent. 0 is a real value that COALESCE treats as known,
+    // which would permanently block the backfill from ever repairing this column —
+    // on the one field this whole feature exists to stop losing. Readers coalesce
+    // to 0 at display time instead.
+    builder_fee: parseNum(f.builderFee),
+    hash: f.hash ?? null,
+    oid: parseNum(f.oid),
+    fee_token: f.feeToken ?? null,
     ts: parseNum(f.time),
-  })).filter((r) => Number.isFinite(r.tid));
+    // A row with no usable ts stores ts = NULL, which every range query silently
+    // excludes (NULL >= n is NULL) — it would count toward the dashboard's totals
+    // while being absent from every export. Drop it rather than let the headline
+    // number disagree with the tax file.
+  })).filter((r) => Number.isFinite(r.tid) && Number.isFinite(r.ts));
   const recentRealized = rows.reduce((s, r) => s + r.closed_pnl, 0);
   return { rows, recentRealized };
+}
+
+// userFunding -> DB rows. The payload nests the interesting fields under `delta`,
+// and the same endpoint carries non-funding ledger events we don't store.
+export function normalizeFunding(entries) {
+  const arr = Array.isArray(entries) ? entries : [];
+  return arr
+    .filter((e) => e?.delta?.type === 'funding')
+    .map((e) => ({
+      ts: parseNum(e.time),
+      coin: e.delta.coin ?? null,
+      usdc: parseNum(e.delta.usdc) ?? 0,
+      funding_rate: parseNum(e.delta.fundingRate),
+      szi: parseNum(e.delta.szi),
+    }))
+    .filter((r) => Number.isFinite(r.ts) && r.coin);
 }
 
 // Convenience wrappers used by server/stream.
@@ -103,6 +131,12 @@ export function getClearinghouseState(address, opts, dex) {
 }
 export function getUserFills(address, opts) {
   return fetchInfo({ type: 'userFills', user: address }, opts);
+}
+export function getUserFunding(address, opts, startTime = 0) {
+  return fetchInfo({ type: 'userFunding', user: address, startTime }, opts);
+}
+export function getUserFillsByTime(address, opts, startTime = 0) {
+  return fetchInfo({ type: 'userFillsByTime', user: address, startTime }, opts);
 }
 
 export function getUserRole(address, opts) {
