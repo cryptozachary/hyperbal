@@ -264,3 +264,31 @@ test('backfillFills on an empty list is a no-op', () => {
   const db = freshDb();
   assert.deepEqual(db.backfillFills('0xabc', []), { scanned: 0, inserted: 0, enriched: 0 });
 });
+
+test('listFillsRange is half-open and getRange spans fills and funding', () => {
+  const db = freshDb();
+  db.ingestFills('0xabc', [
+    { tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.1, px: 100, sz: 1, side: 'A', ts: 100 },
+    { tid: 2, coin: 'BTC', closed_pnl: 3, fee: 0.1, px: 100, sz: 1, side: 'A', ts: 200 },
+    { tid: 3, coin: 'BTC', closed_pnl: 1, fee: 0.1, px: 100, sz: 1, side: 'A', ts: 300 },
+  ]);
+  db.ingestFunding('0xabc', [{ ts: 50, coin: 'BTC', usdc: -1, funding_rate: 0, szi: 1 }]);
+
+  assert.deepEqual(db.listFillsRange('0xabc', 100, 300).map((r) => r.tid), [1, 2], 'to is exclusive');
+  assert.equal(db.listFillsRange('0xabc').length, 3, 'no bounds means everything');
+
+  const range = db.getRange('0xabc');
+  assert.equal(range.minTs, 50, 'funding can predate the first fill');
+  assert.equal(range.maxTs, 300);
+  assert.deepEqual(db.getRange('0xnothing'), { minTs: null, maxTs: null });
+});
+
+test('listFillsRange returns the columns the export needs', () => {
+  const db = freshDb();
+  db.ingestFills('0xabc', [{ tid: 1, coin: 'BTC', closed_pnl: 5, fee: 0.33, builder_fee: 0.23,
+    fee_token: 'USDC', px: 100, sz: 1, side: 'A', dir: 'Close Long', hash: '0xaa', oid: 7, ts: 100 }]);
+  const [row] = db.listFillsRange('0xabc');
+  for (const c of ['tid', 'coin', 'closed_pnl', 'fee', 'builder_fee', 'fee_token', 'px', 'sz', 'side', 'dir', 'hash', 'oid', 'ts']) {
+    assert.ok(c in row, `missing column ${c}`);
+  }
+});

@@ -6,6 +6,7 @@ import { assembleAccount } from './account.js';
 import { backfillWallet } from './backfill.js';
 import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
+import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, DETAILED_COLUMNS, KOINLY_COLUMNS } from './export.js';
 
 // Query params are untrusted strings (or arrays, for repeated params). Coerce to a
 // finite integer, falling back to `dflt` for anything that isn't one.
@@ -59,6 +60,50 @@ export function createApp(db, overrides = {}) {
       limit,
       offset,
     });
+  });
+
+  app.get('/api/range/:address', (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    res.json({ address, ...db.getRange(address) });
+  });
+
+  app.get('/api/export/:address.csv', (req, res) => {
+    const address = String(req.params.address || '').toLowerCase();
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    const format = String(req.query.format || 'detailed');
+    if (format !== 'detailed' && format !== 'koinly') {
+      return res.status(400).json({ error: `Unknown format "${format}". Expected "detailed" or "koinly".` });
+    }
+    // Bounds are computed client-side from the browser's timezone and sent as
+    // explicit epoch ms, so server and client can't disagree on where a year starts.
+    const from = toSafeInt(req.query.from, 0);
+    const to = toSafeInt(req.query.to, Number.MAX_SAFE_INTEGER);
+    const tz = String(req.query.tz || 'UTC');
+
+    const fills = db.listFillsRange(address, from, to);
+    const funding = db.listFunding(address, from, to);
+
+    let csv;
+    if (format === 'koinly') {
+      // No preamble: a vendor import must start at the header row.
+      csv = toCsv(buildKoinlyRows(fills, funding, tz), KOINLY_COLUMNS);
+    } else {
+      const preamble = buildPreamble({
+        address,
+        from: req.query.from == null ? null : from,
+        to: req.query.to == null ? null : to,
+        tz,
+        generatedAt: Date.now(),
+      });
+      csv = toCsv(buildDetailedRows(fills, funding, tz), DETAILED_COLUMNS, preamble);
+    }
+
+    const label = req.query.label ? String(req.query.label).replace(/[^\w-]/g, '') : 'all';
+    const filename = `hyperliquid-${address.slice(0, 10)}-${label}-${format}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
   });
 
   app.get('/api/wallets', (_req, res) => res.json({ wallets: db.listWallets() }));

@@ -29,6 +29,13 @@ function fakeDb(fills = []) {
     countFills(_address, { closesOnly = false } = {}) {
       return fills.filter((f) => match(f, closesOnly)).length;
     },
+    listFillsRange(_address, from = 0, to = Number.MAX_SAFE_INTEGER) {
+      return fills.filter((f) => f.ts >= from && f.ts < to).sort((a, b) => a.ts - b.ts);
+    },
+    getRange() {
+      if (!fills.length) return { minTs: null, maxTs: null };
+      return { minTs: Math.min(...fills.map((f) => f.ts)), maxTs: Math.max(...fills.map((f) => f.ts)) };
+    },
   };
 }
 
@@ -273,4 +280,57 @@ test('GET /api/fills survives non-integer limit/offset against a real DB', async
     const rep = await (await fetch(`${base}?limit=1&limit=2`)).json();
     assert.equal(rep.limit, 50);
   } finally { server.close(); }
+});
+
+test('GET /api/export returns a detailed CSV download with a preamble', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=detailed&tz=UTC`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /text\/csv/);
+    assert.match(res.headers.get('content-disposition'), /attachment; filename=/);
+    const lines = (await res.text()).split('\r\n');
+    assert.ok(lines[0].startsWith('# Hyperliquid trade export'), lines[0]);
+    const header = lines.find((l) => !l.startsWith('#'));
+    assert.ok(header.startsWith('time_utc,time_local,type,coin'), header);
+  }, SEED_FILLS);
+});
+
+test('GET /api/export honours format=koinly and emits no preamble', async () => {
+  await withServer({}, async (base) => {
+    const body = await (await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=koinly&tz=UTC`)).text();
+    // A vendor import must start at the header row — no comment lines above it.
+    assert.ok(body.startsWith('Date,Sent Amount,Sent Currency'), body.slice(0, 80));
+  }, SEED_FILLS);
+});
+
+test('GET /api/export applies a half-open from/to range', async () => {
+  await withServer({}, async (base) => {
+    // SEED_FILLS are at ts 10, 20, 30
+    const body = await (await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=koinly&tz=UTC&from=10&to=30`)).text();
+    const dataRows = body.trim().split('\r\n').slice(1);
+    assert.equal(dataRows.length, 2, 'to is exclusive, so ts=30 is out');
+  }, SEED_FILLS);
+});
+
+test('GET /api/export rejects an unknown format and a bad address', async () => {
+  await withServer({}, async (base) => {
+    assert.equal((await fetch(`${base}/api/export/${FILLS_ACC}.csv?format=turbotax`)).status, 400);
+    assert.equal((await fetch(`${base}/api/export/nope.csv?format=detailed`)).status, 400);
+  }, SEED_FILLS);
+});
+
+test('GET /api/range returns the data span', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/range/${FILLS_ACC}`);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.minTs, 10);
+    assert.equal(json.maxTs, 30);
+  }, SEED_FILLS);
+});
+
+test('GET /api/range rejects an invalid address', async () => {
+  await withServer({}, async (base) => {
+    assert.equal((await fetch(`${base}/api/range/nope`)).status, 400);
+  });
 });

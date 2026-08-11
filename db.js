@@ -132,6 +132,12 @@ export function openDb(dbPath) {
       SELECT ts, coin, usdc, funding_rate, szi FROM funding
       WHERE address = ? AND ts >= ? AND ts < ? ORDER BY ts ASC, coin ASC
     `),
+    listFillsRange: db.prepare(`
+      SELECT tid, coin, closed_pnl, fee, builder_fee, fee_token, px, sz, side, dir, hash, oid, ts
+      FROM fills WHERE address = ? AND ts >= ? AND ts < ? ORDER BY ts ASC, tid ASC
+    `),
+    rangeFills: db.prepare(`SELECT MIN(ts) AS lo, MAX(ts) AS hi FROM fills WHERE address = ?`),
+    rangeFunding: db.prepare(`SELECT MIN(ts) AS lo, MAX(ts) AS hi FROM funding WHERE address = ?`),
   };
 
   const FILL_DEFAULTS = { dir: null, builder_fee: null, hash: null, oid: null, fee_token: null };
@@ -194,6 +200,17 @@ export function openDb(dbPath) {
     // Returns the number of rows actually inserted (duplicates are ignored).
     ingestFunding(address, rows) { return rows?.length ? ingestFundingTxn(address, rows) : 0; },
     listFunding(address, from = 0, to = Number.MAX_SAFE_INTEGER) { return stmts.listFunding.all(address, from, to); },
+    listFillsRange(address, from = 0, to = Number.MAX_SAFE_INTEGER) {
+      return stmts.listFillsRange.all(address, from, to);
+    },
+    // Oldest and newest event across both tables, for building the year picker.
+    getRange(address) {
+      const f = stmts.rangeFills.get(address);
+      const g = stmts.rangeFunding.get(address);
+      const lows = [f.lo, g.lo].filter((v) => v != null);
+      const highs = [f.hi, g.hi].filter((v) => v != null);
+      return { minTs: lows.length ? Math.min(...lows) : null, maxTs: highs.length ? Math.max(...highs) : null };
+    },
     // Returns true if a snapshot was written, false if throttled.
     insertSnapshotThrottled(address, point, minIntervalMs) {
       const last = stmts.lastSnapshotTs.get(address).ts;

@@ -142,3 +142,30 @@ test('koinly rows use the declared column set', () => {
   for (const c of KOINLY_COLUMNS) assert.ok(c in row, `missing column ${c}`);
   assert.equal(Object.keys(row).length, KOINLY_COLUMNS.length, 'no stray keys leak into the row');
 });
+
+test('detailed CSV totals reconcile with the source rows', async () => {
+  const { openDb } = await import('../db.js');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const db = openDb(path.join(os.tmpdir(), `hl-recon-${Date.now()}-${Math.random().toString(16).slice(2)}.db`));
+  const A = '0x' + 'c'.repeat(40);
+
+  db.ingestFills(A, [
+    { tid: 1, coin: 'BTC', closed_pnl: 12.5, fee: 0.33149, builder_fee: 0.231488, fee_token: 'USDC',
+      px: 81224, sz: 0.00285, side: 'A', dir: 'Close Long', hash: '0xa', oid: 1, ts: 100 },
+    { tid: 2, coin: 'ETH', closed_pnl: -4.25, fee: 0.1, builder_fee: 0.05, fee_token: 'USDC',
+      px: 3000, sz: 0.1, side: 'B', dir: 'Close Short', hash: '0xb', oid: 2, ts: 200 },
+  ]);
+  db.ingestFunding(A, [{ ts: 150, coin: 'BTC', usdc: -0.00982, funding_rate: 0.0000125, szi: 130 }]);
+
+  const rows = buildDetailedRows(db.listFillsRange(A), db.listFunding(A), 'UTC');
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+
+  assert.equal(rows.length, 3);
+  assert.equal(sum('realized_pnl'), 12.5 - 4.25);
+  assert.equal(sum('fee'), 0.33149 + 0.1);
+  assert.equal(sum('builder_fee'), 0.231488 + 0.05);
+  assert.equal(sum('funding'), -0.00982);
+  // the merged order is chronological across both tables
+  assert.deepEqual(rows.map((r) => r.type), ['fill', 'funding', 'fill']);
+});
