@@ -1,9 +1,6 @@
+import { fmtUsd, fmtNum, fmtTime, cls, short, esc } from './js/format.js';
+
 const $ = (id) => document.getElementById(id);
-const fmtUsd = (n) => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const fmtNum = (n, d = 4) => n == null ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
-const cls = (n) => n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '';
-const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const state = {
   address: null, ws: null, pollTimer: null, refreshTimer: null, fillsReloadTimer: null,
@@ -55,7 +52,6 @@ function renderAccount(d) {
 
 // Pre-migration rows have no dir; fall back to the raw HL side (B = bid/buy, A = ask/sell).
 const dirText = (f) => f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : '—');
-const fmtTime = (ts) => ts == null ? '—' : new Date(ts).toLocaleString();
 
 function fillRowHtml(f) {
   return `
