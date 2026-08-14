@@ -49,8 +49,10 @@
 body{margin:0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:
   radial-gradient(1200px 600px at 20% -10%,var(--bg-glow) 0%,transparent 60%),var(--bg);color:var(--text)}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);
-  padding:var(--sp-3) var(--sp-5);border-bottom:1px solid var(--line);background:var(--scrim-70);
-  position:sticky;top:0;backdrop-filter:blur(8px);flex-wrap:wrap}
+  padding:var(--sp-3) var(--sp-5);border-bottom:1px solid var(--line);background:transparent;
+  position:sticky;top:0;z-index:60;flex-wrap:wrap}
+.topbar::before{content:"";position:absolute;inset:0;background:var(--scrim-70);
+  backdrop-filter:blur(8px);z-index:-1;pointer-events:none}
 .brand{font-weight:700;letter-spacing:.3px}
 .controls{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
 select,input,button{background:var(--bg2);color:var(--text);border:1px solid var(--line);
@@ -217,7 +219,7 @@ td{border-bottom:1px solid var(--line-soft)}
 .chip-long,.chip-buy{color:var(--pos);background:var(--pos-a12)}
 .chip-short,.chip-sell{color:var(--neg);background:var(--neg-a12)}
 .chip-flat{color:var(--muted);background:var(--surface-2)}
-.empty{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2)}
+div.empty{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2)}
 .empty-icon{font-size:20px;opacity:.6}
 @media(max-width:760px){
   /* Pinned first column: opaque background so rows don't show through as they
@@ -230,13 +232,15 @@ td{border-bottom:1px solid var(--line-soft)}
   tbody tr:hover td:first-child{background:var(--surface-2)}
 }
 
-/* Wallet switcher + popover (Task 12). */
-.topbar{position:relative}
+/* Wallet switcher + popover (Task 12). .topbar is already `position:sticky` (a valid
+   positioned containing block for .pop) so no extra rule is needed here — see the
+   sticky/blur/stacking-context notes on .topbar itself further up this file. */
 .switcher{display:inline-flex;align-items:center;gap:var(--sp-2);background:var(--bg2);
-  border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-1) var(--sp-3);cursor:pointer;text-align:left}
+  border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-1) var(--sp-3);cursor:pointer;
+  text-align:left;min-width:0}
 .avatar{width:22px;height:22px;border-radius:6px;background:var(--surface-2);flex:none}
-.switcher-text{display:flex;flex-direction:column;line-height:1.25}
-.switcher-name{font-size:var(--fs-sm)}
+.switcher-text{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.switcher-name{font-size:var(--fs-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .switcher-sub{font-size:var(--fs-xs);color:var(--muted)}
 .switcher-caret{color:var(--muted);font-size:var(--fs-xs)}
 .pop{position:absolute;top:calc(100% + var(--sp-2));right:var(--sp-5);width:340px;z-index:50;
@@ -246,15 +250,17 @@ td{border-bottom:1px solid var(--line-soft)}
 .pop-divider{height:1px;background:var(--line);margin:var(--sp-3) 0}
 .pop-item{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-2);
   padding:var(--sp-2);border-radius:var(--r-sm);font-size:var(--fs-sm);cursor:pointer;width:100%;
-  background:none;border:0;color:var(--text);text-align:left}
+  background:none;border:0;color:var(--text);text-align:left;min-width:0}
 .pop-item:hover,.pop-item.sel{background:var(--surface-2)}
+.pop-item-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .pop-item .via{color:var(--muted);font-size:var(--fs-xs)}
 .pop-del{background:none;border:0;color:var(--muted);cursor:pointer;padding:var(--sp-1);border-radius:var(--r-sm)}
 .pop-del:hover{color:var(--neg);background:var(--neg-a12)}
-.pop-row{display:flex;align-items:center;gap:var(--sp-1)}
+.pop-row{display:flex;align-items:center;gap:var(--sp-1);min-width:0}
 .pop-add{display:flex;gap:var(--sp-2)}
 .pop-add input{flex:1;min-width:0}
 @media(max-width:640px){
   .pop{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;
+    max-height:80vh;overflow-y:auto;overscroll-behavior:contain;
     border-radius:var(--r-lg) var(--r-lg) 0 0}
 }
