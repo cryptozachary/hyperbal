@@ -67,7 +67,7 @@
     {
       "id": 8,
       "subject": "Task 8: Chart interaction - crosshair, tooltip, last-value pill",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         7
       ],
@@ -124,5 +124,5 @@
       "description": "**Goal:** Bring the README in line with what the app now does, and run the whole manual checklist once.\n\n**Files:**\n- Modify: README.md\n\n**Verify:** `npm test`; full manual checklist in the plan\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Features section describes the interactive chart and the switcher popover\", \"Project structure block reflects public/js/\", \"no chart library claim still present and still true\", \"Test section mentions the frontend unit tests\", \"full manual checklist passes\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-08-14T11:55:00.000Z"
+  "lastUpdated": "2026-08-14T12:40:00.000Z"
 }
