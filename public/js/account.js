@@ -9,7 +9,10 @@ const $ = (id) => document.getElementById(id);
 // module doesn't reach into another module's private state.
 const CSS = getComputedStyle(document.documentElement);
 const token = (name, fallback) => (CSS.getPropertyValue(name) || '').trim() || fallback;
-const SPARK_COLOR = { pos: token('--pos', '#1fd09a'), neg: token('--neg', '#ff5d6c') };
+// Captured once at module load — matches chart.js's own COLORS pattern, but note
+// this means these three would go stale if a light/dark toggle is ever added;
+// that would need live token() reads per paint instead of a frozen object.
+const SPARK_COLOR = { pos: token('--pos', '#1fd09a'), neg: token('--neg', '#ff5d6c'), muted: token('--muted', '#8a97b1') };
 
 export function render(d) {
   $('equity').textContent = fmtUsd(d.equity);
@@ -65,8 +68,15 @@ function renderDelta(elId, values) {
 
 function spark(canvasId, values) {
   const finite = values.filter((v) => v != null && Number.isFinite(v));
-  const rising = finite.length < 2 || finite[finite.length - 1] >= finite[0];
-  drawSparkline($(canvasId), values, rising ? SPARK_COLOR.pos : SPARK_COLOR.neg);
+  let color = SPARK_COLOR.pos; // fewer than 2 points: no trend to speak of, same
+                                // default chart.js itself uses for a single dot
+  if (finite.length >= 2) {
+    const delta = finite[finite.length - 1] - finite[0];
+    // Match changeReadout's tie-break: a flat run (delta exactly 0) reads as the
+    // neutral `·`, not the up arrow, so it shouldn't paint green either.
+    color = delta > 0 ? SPARK_COLOR.pos : delta < 0 ? SPARK_COLOR.neg : SPARK_COLOR.muted;
+  }
+  drawSparkline($(canvasId), values, color);
 }
 
 // Cached so a resize can repaint without re-fetching — the points came from a
@@ -105,23 +115,38 @@ window.addEventListener('resize', () => {
   resizeFrame = requestAnimationFrame(() => { resizeFrame = null; paintSparks(); });
 });
 
+// Clears just the trend-bearing pieces — the 24h deltas, the sparklines, and the
+// cache resize repaints from — without touching the card values or the position
+// table. Called by reset() below, and also by app.js at the top of every wallet
+// switch: render(d) repaints the values synchronously, but renderSparks() only
+// arrives after a second, separate network round trip that can be slow or can
+// fail outright. Without this, a switch (or a delete-and-select-next) would
+// otherwise leave the previous wallet's deltas/sparklines sitting under the new
+// wallet's numbers — at full opacity once loading clears — until the next
+// successful refresh happens to overwrite them.
+export function clearTrends() {
+  for (const id of ['equityDelta', 'uPnlDelta', 'rPnlDelta']) {
+    const el = $(id);
+    el.textContent = '';
+    el.className = 'card-sub';
+  }
+  lastSparkPoints = [];
+  for (const id of ['equitySpark', 'uPnlSpark', 'rPnlSpark']) {
+    const c = $(id);
+    c.getContext('2d').clearRect(0, 0, c.width, c.height);
+  }
+}
+
 export function reset() {
   for (const id of ['equity', 'uPnl', 'rPnl']) {
     $(id).textContent = '—';
     $(id).className = 'card-value';
   }
   $('posCount').textContent = '—';
-  for (const id of ['equityDelta', 'uPnlDelta', 'rPnlDelta', 'posSplit']) {
-    const el = $(id);
-    el.textContent = '';
-    el.className = 'card-sub';
-  }
+  $('posSplit').textContent = '';
+  $('posSplit').className = 'card-sub';
   $('rPnlRecent').textContent = '';
-  lastSparkPoints = [];
-  for (const id of ['equitySpark', 'uPnlSpark', 'rPnlSpark']) {
-    const c = $(id);
-    c.getContext('2d').clearRect(0, 0, c.width, c.height);
-  }
+  clearTrends();
   $('positions').querySelector('tbody').innerHTML = '';
   $('emptyState').classList.remove('hidden');
 }

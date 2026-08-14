@@ -66,7 +66,8 @@ button:hover{border-color:var(--accent)}
 main{max-width:1100px;margin:0 auto;padding:var(--sp-5);position:relative}
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-3);margin-bottom:18px}
 .card{background:linear-gradient(180deg,var(--surface-1),var(--card-grad-end));border:1px solid var(--line);
-  border-radius:var(--r-lg);padding:var(--sp-4);box-shadow:var(--shadow-card)}
+  border-radius:var(--r-lg);padding:var(--sp-4);box-shadow:var(--shadow-card);
+  display:flex;flex-direction:column}
 .card-label{color:var(--muted);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.6px}
 .card-value{font-size:var(--fs-xl);font-weight:700;letter-spacing:-.3px;margin-top:6px}
 .card-sub{font-size:var(--fs-sm);color:var(--muted);margin-top:4px}
@@ -77,8 +78,11 @@ main{max-width:1100px;margin:0 auto;padding:var(--sp-5);position:relative}
    type scale is what tells them apart at a glance. */
 .card-note{font-size:var(--fs-xs);color:var(--muted);margin-top:2px}
 /* 20px, not #chart's 280px — Task 10's summary-card trend lines, deliberately
-   their own class so they don't inherit the panel chart's sizing. */
-.spark{display:block;width:100%;height:20px;margin-top:var(--sp-1)}
+   their own class so they don't inherit the panel chart's sizing. margin-top:auto
+   (the card is now a column flexbox) pins every spark to the card's bottom edge,
+   so the three trend lines share one baseline even though the Realized card has
+   an extra card-note line pushing everything above it down. */
+.spark{display:block;width:100%;height:20px;margin-top:auto}
 .panel{background:linear-gradient(180deg,var(--surface-1),var(--card-grad-end));border:1px solid var(--line);
   border-radius:var(--r-lg);padding:var(--sp-4);margin-bottom:18px}
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
@@ -149,12 +153,18 @@ th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppe
    1px border = 46px) so a skeleton row doesn't shift the table when it's swapped
    for real content. */
 .skeleton-row{height:46px}
-.is-loading .card-value,.is-loading .card-sub{color:transparent;position:relative}
+.is-loading .card-value,.is-loading .card-sub,.is-loading .card-note{color:transparent;position:relative}
 .is-loading .card-value::after{content:"";position:absolute;inset:2px 30% 2px 0;border-radius:var(--r-sm);
   background:var(--surface-2);animation:shimmer 1.4s linear infinite;
   background-image:linear-gradient(90deg,var(--surface-2) 25%,var(--line) 37%,var(--surface-2) 63%);
   background-size:400% 100%}
-.is-loading canvas{opacity:.35}
+/* Split from a bare `canvas` selector on purpose: a 280px chart reads fine dimmed
+   to 35%, but a 20px sparkline is still perfectly legible at that opacity, which
+   let a stale trend line survive the loading state. #chart and .spark are named
+   explicitly (not `canvas`) so a canvas Task 12 adds doesn't silently inherit
+   either treatment without a deliberate choice. */
+.is-loading #chart{opacity:.35}
+.is-loading .spark{visibility:hidden}
 
 /* ---- modal ---- */
 .modal-backdrop{position:fixed;inset:0;background:var(--scrim-62);backdrop-filter:blur(3px);

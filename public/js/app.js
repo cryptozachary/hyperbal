@@ -21,12 +21,16 @@ function clearError() { $('error').classList.add('hidden'); }
 // chart happens to be showing. Failures here are swallowed rather than routed to
 // showError: a stale sparkline is a minor cosmetic gap, not a reason to blank the
 // whole page the way a failed account fetch is.
+let sparksSeq = 0; // generation guard — same mySeq/want pattern as chart-panel.js and exports.js
 async function loadSparks() {
   if (!state.address) return;
-  const forAddress = state.address;
+  const want = state.address;
+  const mySeq = ++sparksSeq;
   try {
     const { points } = await api.getHistory(state.address, Date.now() - 86400000);
-    if (state.address !== forAddress) return; // superseded by a wallet switch mid-flight
+    // Stale-response guard: an overlapping refresh (poll racing the refresh
+    // button) or a wallet switch mid-flight must not paint over a newer result.
+    if (mySeq !== sparksSeq || want !== state.address) return;
     account.renderSparks(points);
   } catch {}
 }
@@ -63,6 +67,12 @@ function resetDashboard() {
 }
 
 async function selectAddress(address) {
+  // Wipe the previous wallet's deltas/sparklines synchronously, before any async
+  // work starts: render(d) below repaints the card values as soon as getAccount
+  // resolves, but renderSparks() only arrives after a second, independent fetch
+  // that can lag well behind (or fail and never arrive at all, via loadSparks's
+  // own swallowed catch) — see clearTrends()'s comment in account.js.
+  account.clearTrends();
   state.address = address;
   fills.setAddress(address);
   exportsPanel.setAddress(address);   // synchronous, in step with the others
