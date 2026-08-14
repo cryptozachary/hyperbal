@@ -170,3 +170,13 @@ th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppe
 @keyframes pulse{0%{box-shadow:0 0 0 0 var(--pos-a40)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
 
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- chart range pills + change readout ---- */
+.panel-head-controls{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
+.chart-change{font-size:var(--fs-sm);color:var(--muted);margin:2px 0 var(--sp-2)}
+.chart-change.pos{color:var(--pos)} .chart-change.neg{color:var(--neg)}
+.pill{display:inline-flex;gap:2px;background:var(--surface-3);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:2px}
+.pill button{background:none;border:0;color:var(--muted);font-size:11px;
+  padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:11px}
+.pill button.on{background:var(--surface-2);color:var(--accent)}

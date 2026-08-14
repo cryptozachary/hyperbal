@@ -32,10 +32,21 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Equity / PnL History</h2>
-        <div class="toggle" id="chartToggle">
-          <button class="active" data-series="equity">Equity</button>
-          <button data-series="pnl">PnL</button>
+        <div>
+          <h2>Equity / PnL History</h2>
+          <div id="chartChange" class="chart-change">—</div>
+        </div>
+        <div class="panel-head-controls">
+          <div class="toggle" id="chartToggle">
+            <button class="active" data-series="equity">Equity</button>
+            <button data-series="pnl">PnL</button>
+          </div>
+          <div class="pill" id="chartRange">
+            <button data-range="86400000">24h</button>
+            <button data-range="604800000">7d</button>
+            <button data-range="2592000000">30d</button>
+            <button class="on" data-range="all">All</button>
+          </div>
         </div>
       </div>
       <canvas id="chart"></canvas>
