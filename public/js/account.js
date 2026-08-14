@@ -17,6 +17,12 @@ export function render(d) {
   $('uPnl').className = 'card-value ' + cls(d.totalUnrealizedPnl);
   $('rPnl').textContent = fmtUsd(d.realizedPnlCumulative);
   $('rPnl').className = 'card-value ' + cls(d.realizedPnlCumulative);
+  // Provenance note, not a trend — how much of the cumulative figure above came
+  // from Hyperliquid's recent-fills window. Distinct from rPnlDelta (the 24h
+  // change, painted separately by renderSparks once the sparkline history
+  // arrives): this one is available immediately from the account payload.
+  $('rPnlRecent').textContent =
+    d.realizedPnlRecent != null ? `recent window: ${fmtUsd(d.realizedPnlRecent)}` : '';
   $('posCount').textContent = d.openPositionsCount ?? 0;
 
   const positions = d.positions || [];
@@ -110,6 +116,7 @@ export function reset() {
     el.textContent = '';
     el.className = 'card-sub';
   }
+  $('rPnlRecent').textContent = '';
   lastSparkPoints = [];
   for (const id of ['equitySpark', 'uPnlSpark', 'rPnlSpark']) {
     const c = $(id);
