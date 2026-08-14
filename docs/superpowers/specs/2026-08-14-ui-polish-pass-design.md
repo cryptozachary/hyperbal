@@ -1,0 +1,334 @@
+# UI Polish Pass — Design
+
+**Date:** 2026-08-14
+**Status:** Approved
+
+## Problem
+
+The dashboard works, but it looks unfinished. It has grown one feature at a time —
+core dashboard, agent wallets, builder dexs, trade history, tax export — and each
+addition appended a panel and some CSS without anyone re-examining the whole. The
+result is a page that reads as a stack of accreted parts rather than a designed
+product, against a README that promises a "dark, premium trading-dashboard UI."
+
+Four specific gaps:
+
+1. **The chart is a bare canvas line.** No axes, no gridlines, no dates, no
+   interaction. It cannot tell you *when* anything happened or *what* a point is
+   worth. It maps a `null` unrealized PnL to `0`, drawing a line through zero as
+   if that were an observation.
+2. **The tables are unstyled rows.** Proportional numerals mean digits jitter as
+   live values update. No hover state, no visual weight anywhere, side rendered
+   as colored text.
+3. **The cards and header carry no hierarchy.** Four identical cards with no
+   trend or delta. The header packs a select, a 280px input, three buttons, and a
+   badge into one row that wraps awkwardly — and two of those buttons (Add,
+   ✕ Delete) are things you touch rarely.
+4. **The states are placeholders.** Loading is the word "Loading…" over a dimmed
+   box. Errors are a red box that stays. Wallet deletion uses `window.confirm()`.
+
+## Goals
+
+Refine the visual execution of what already exists, in the existing dark palette,
+with no new runtime dependencies.
+
+## Non-goals
+
+- **New analytics.** Win rate, per-coin PnL, drawdown, fee totals, and a
+  Performance panel are a separate project with its own spec. Nothing in this
+  pass adds a DB query, an API route, or a new data source.
+- **A redesign.** The palette, the panel structure, and the information
+  architecture stay. This is direction "refine what's there," not a new look.
+- **A framework, a bundler, or a chart library.** The frontend stays vanilla. The
+  README's "no chart library" claim remains true after this work.
+- **Wallet renaming.** `db.js` has a `label` column that nothing writes, and the
+  new popover makes its absence obvious. It is still a feature, not polish.
+- **Server, `db.js`, and `export.js` changes.** No file outside `public/` and
+  `test/` is modified except `README.md`.
+
+---
+
+## Decisions taken
+
+| Question | Decision |
+|---|---|
+| Visual direction | **Refine the existing palette** — same navy surfaces and shapes, executed properly. Not a terminal look, not a fintech restyle. |
+| Chart scope | **Full** — axes, gridlines, area fill, crosshair tooltip, range pills, change-over-range readout. |
+| Header layout | **Wallet switcher with a popover** — the list, add field, and per-wallet delete move out of the persistent header. |
+| Dependencies | **None added.** Chart is hand-rolled canvas. |
+| Frontend structure | **Split `app.js` by concern** into native ES modules. |
+
+### Why the module split is in scope
+
+`public/app.js` is 440 lines doing formatting, account rendering, fills paging,
+export, charting, WebSocket handling, wallet CRUD, and bootstrap. This pass adds
+roughly 320 lines to it — the chart alone is ~200 — which would leave a single
+~760-line file. The split is not opportunistic refactoring; it is what makes the
+chart work tractable and independently testable.
+
+### `/api/history` needs no change
+
+The range pills were initially scoped as needing a new query parameter. They do
+not. `server.js:47` already reads `?since=` and passes it to
+`db.getHistory(address, since)`; the client simply never sends it. Range
+selection is pure frontend work against an endpoint that already exists.
+
+---
+
+## Architecture
+
+### Module layout
+
+`public/app.js` splits into `public/js/`, loaded via
+`<script type="module" src="js/app.js">`. Native ES modules — no bundler, no
+build step, no new dependency.
+
+| Module | Owns | Depends on |
+|---|---|---|
+| `format.js` | `fmtUsd`, `fmtNum`, `fmtPct`, `fmtTime`, `fmtCompact`, `cls`, `short`, `esc` | nothing — pure, no DOM |
+| `api.js` | the `fetch` wrapper; one named function per route; the only file that knows route strings | nothing |
+| `chart.js` | canvas: scales, ticks, gridlines, area fill, crosshair hit-testing, tooltip, sparse-data notice, sparklines | `format.js` |
+| `account.js` | summary cards and positions table | `format.js` |
+| `fills.js` | trade history table, filter, pager, live-append reload | `format.js`, `api.js` |
+| `wallets.js` | switcher popover: list, select, add, delete-with-confirm | `api.js`, `feedback.js` |
+| `exports.js` | period picker, sync button, download links | `api.js`, `feedback.js` |
+| `feedback.js` | toasts, skeletons, confirm dialog, status badge | nothing |
+| `app.js` | `state`, WebSocket, fallback polling, wiring, bootstrap | all of the above |
+
+### Interfaces
+
+Each panel module exports `mount(root, handlers)` and `render(data)`. `app.js`
+never reaches into a panel's DOM; a panel never reads global state.
+
+`chart.js` is the strictest boundary:
+
+```js
+createChart(canvasEl) -> { render(points, { series, range }), destroy() }
+// points: [{ ts, equity, unrealized_pnl, realized_pnl_cum }] — the snapshot row as stored
+// series: 'equity' | 'pnl'   (the main chart's toggle)
+```
+
+The main chart plots `equity` or `unrealized_pnl`; card sparklines additionally
+read `realized_pnl_cum`, which is why `render` takes the whole snapshot row
+rather than a pre-projected series.
+
+It knows nothing about wallets, the API, or the socket. Its pure geometry helpers
+(`niceTicks`, `computeScales`, `nearestIndex`) are exported for testing.
+
+### Data flow
+
+Unchanged: REST load on wallet select → WebSocket `refresh` / `realized` messages
+→ 30s fallback poll. One new call path — clicking a range pill re-fetches
+`/api/history/:address?since=<ms>` and re-renders the chart only.
+
+### Behavior preserved verbatim
+
+These have non-obvious reasons documented in comments. They move to their new
+files unchanged, comments included:
+
+- The fills-page clamp (`app.js:97`) — a page can fall off the end of the data
+  after a purge, a second tab, or a restart.
+- The stale-broadcast guard (`app.js:303`) — the hub keeps routing the previously
+  watched address until the new `watch` lands.
+- "Re-read page 1 rather than splice" (`app.js:192`) — the upstream `userFills`
+  sub replays a snapshot on every reconnect.
+- Client-side year bounds for export (`app.js:107`) — the browser computes them so
+  the server never guesses the user's timezone.
+
+---
+
+## Visual system
+
+### Tokens
+
+`styles.css` gains a token layer; everything else references it.
+
+- **Color:** existing palette, plus the intermediate values currently hardcoded
+  (`#121624`, `#1a2131`, `#10151f` → `--surface-1/2/3`), `--line-soft` for
+  interior row borders, and `--pos-a12` / `--neg-a12` for chip backgrounds.
+- **Space:** `--sp-1`…`--sp-6` (4/8/12/16/24/32). Today nine different padding
+  values do the work of five.
+- **Radius:** `--r-sm` 8, `--r-md` 10, `--r-lg` 14, `--r-pill` 999.
+- **Type:** `--fs-xs` 10 … `--fs-2xl` 26, plus `--num`
+  (`font-variant-numeric: tabular-nums`) applied to every numeric cell and card
+  value.
+- **Motion:** `--dur-fast` 120ms, `--dur` 180ms, one shared easing — all disabled
+  under `prefers-reduced-motion`.
+- **Breakpoints:** two, deliberately. **760px** (the existing one) governs the
+  card grid and table scrolling; **640px** governs the popover becoming a bottom
+  sheet, since the switcher stays usable in a wrapped header longer than the
+  tables stay readable.
+
+### Summary cards
+
+Label (10px uppercase muted) → value (21px, 700, tabular, tight tracking) →
+delta → 20px sparkline. Equity, Unrealized, and Realized each get a sparkline
+from the history series. Open Positions gets a long/short split (`2 long · 1
+short`) instead.
+
+**Card deltas are fixed at 24h regardless of the chart's range pill.** Tying them
+to the chart range would mean changing the chart silently changes what the cards
+claim. If fewer than two snapshots exist in that 24h window, the delta renders
+`—`, not a fabricated `0.00%`.
+
+### Tables
+
+Tabular numerals throughout; hover row highlight (no zebra); side as a filled
+chip rather than colored text; coin cell gets weight with the dex collateral as a
+muted suffix. Header row sticky on scroll. Below 760px the table scrolls
+horizontally inside its panel with the first column pinned, rather than the page
+scrolling sideways.
+
+Trade History's Direction column becomes a chip too, colored by buy/sell, using
+the existing `dir` field with the same raw-`side` fallback that is there now
+(pre-migration rows have no `dir`).
+
+### Header and popover
+
+The switcher shows a deterministic gradient avatar (hue derived from the
+address), the label or short address, and the wallet count. The popover holds the
+wallet list with a per-row `✕`, the `via agent` tag where relevant, a divider,
+and the add field.
+
+- Closes on Escape, outside click, and on selection.
+- `aria-expanded` on the trigger, roving focus within the list.
+- Below 640px it becomes a full-width bottom sheet.
+
+Per-wallet delete replaces today's "delete whatever is selected in the dropdown"
+and inherits the existing warning copy.
+
+**Refresh stays in the header** alongside the switcher and the status badge —
+those three are what you look at constantly, and they are the only controls the
+header keeps.
+
+The status badge gains a pulse dot with three states (Live / Polling / Down). The
+pulse is one of the animations `prefers-reduced-motion` disables.
+
+---
+
+## Chart
+
+### Size
+
+The canvas grows from today's hardcoded 220px to **280px** on desktop and 200px
+below 760px, since axis labels and the x-axis date row now consume vertical space
+the plot used to have. Height stops being duplicated between the `height`
+attribute in the markup and the `h` constant in the draw function — `chart.js`
+reads the element's CSS box, and DPR scaling works as it does today.
+
+### Scales
+
+Y ticks from a nice-number algorithm (1/2/5 × 10ⁿ) targeting 4–5 gridlines, range
+padded 5% so the line never touches the frame. A flat series (min === max)
+centers the line in a ±1% band rather than dividing by zero — today's `y()`
+already special-cases this and the behavior carries over.
+
+X labels adapt to the span: `HH:mm` at 24h, `MMM d` at 7d/30d, `MMM yyyy` once
+the span exceeds a year.
+
+### Null handling
+
+Today `drawChart` maps a null `unrealized_pnl` to `0`, drawing a line through
+zero as though it were an observation. Nulls become **gaps** in the line.
+
+### Interaction
+
+Pointer events (so touch drag works). `nearestIndex` finds the snapshot by binary
+search on `ts`. Dashed vertical crosshair, marker dot on the line, and a tooltip
+showing exact value and timestamp. The tooltip flips to the left of the crosshair
+when it would overflow the right edge. `pointerleave` clears it. The last value
+stays pinned as a pill at the right edge.
+
+### Range
+
+Pills for 24h / 7d / 30d / All, re-fetching `?since=<ms>`. **Default is All**, so
+first load behaves exactly as it does today; the selection is remembered in
+memory for the session. Beside the title, a change-over-range readout: absolute
+and percent from the first to the last point in range, colored by sign.
+
+### Sparse-data honesty
+
+Snapshots are throttled to one per `SNAPSHOT_MIN_INTERVAL_MS` (60s default) *and*
+only accrue while a saved wallet is being viewed, so short ranges are often
+genuinely thin.
+
+- **Under 2 points in range:** no line. "Only 1 snapshot in this range —
+  snapshots accrue while the dashboard is open."
+- **2–4 points:** draw the line, with a muted `4 snapshots` note so a
+  three-segment zigzag is not mistaken for a trend.
+
+Card sparklines reuse `chart.js`'s scale helpers rather than reimplementing them.
+
+---
+
+## States and feedback
+
+**Skeletons replace the overlay.** The dimmed box with "Loading…" is removed;
+cards, chart, and table rows render shimmer placeholders in their real shapes.
+Shimmer is static under `prefers-reduced-motion`.
+
+**Toasts** — bottom-right stack, 5s auto-dismiss, manually dismissible. Used for
+completed sync results, wallet added/removed, and transient errors.
+
+**A truncated sync is not a toast.** When `/api/backfill` returns `truncated`,
+today's inline text tells you to click again to continue, and the client holds
+resume cursors in `state.syncResume` that only that message explains. That line
+stays in the Export panel and persists until the next sync — it is actionable, so
+it must not fade. A *completed* sync gets the toast.
+
+**Error policy**, stated once so it is not decided per-case:
+
+> A failure that leaves the dashboard unusable gets the persistent inline error
+> region. A failure that does not gets a toast.
+
+A toast that fades is the wrong medium when the page behind it is blank.
+
+**Custom confirm dialog** replaces `window.confirm()` for wallet deletion.
+Focus-trapped, Escape cancels, explicit Delete button, carrying today's exact
+warning about purging fills, funding, and equity snapshots. It names the wallet
+but quotes **no counts** — the popover can delete a wallet other than the one
+loaded, and showing a number belonging to a different wallet is worse than
+showing none.
+
+**Empty states** get an icon, a one-line explanation, and an action where one
+exists. Trade History's empty state offers **Sync full history** inline rather
+than only saying "No trades recorded yet."
+
+Chart rendering is wrapped so a draw failure degrades to a note instead of taking
+down the page.
+
+---
+
+## Verification
+
+### Automated
+
+`npm test` must stay green. No server, `db.js`, or `export.js` changes are in
+scope, so no existing test should need to move.
+
+New `node:test` files — the first frontend tests in the repo. Both targets are
+pure functions, so neither needs a DOM or a canvas:
+
+- **`test/format.test.js`** — currency formatting, negatives, nulls, and
+  `fmtCompact` axis labels (`$49k`, `$1.2M`, sub-thousand values).
+- **`test/chart.test.js`** — `niceTicks` across zero-spanning, flat, and
+  sub-unit ranges; `computeScales` when `min === max`; `nearestIndex` on empty,
+  single-point, exact-match, and out-of-range input.
+
+### Manual
+
+Rendering is verified against a checklist:
+
+- Live WebSocket updates still land in the cards and in Trade History.
+- Fills paging and the closes-only filter behave, including the page clamp.
+- Deleting the last wallet resets every panel.
+- Both CSV downloads still fire, and the period picker still populates.
+- Agent-wallet badge and Connected Agent Wallets panel still render.
+- Layout holds at 1440 / 768 / 375px.
+- `prefers-reduced-motion` disables shimmer, pulse, and transitions.
+
+## Documentation
+
+`README.md`'s Features section gains the chart interaction and the header change.
+Its "no chart library" claim stays true. The Project structure block is updated
+for `public/js/`.
