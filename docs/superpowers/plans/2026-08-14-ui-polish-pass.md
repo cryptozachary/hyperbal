@@ -1620,8 +1620,11 @@ export function pickXLabels(n) {
 export function pointerToIndex(px, plot, points, span, slack = 8) {
   if (!points.length) return -1;
   const { x0, x1 } = plot;
-  if (px < x0 - slack || px > x1 + slack) return -1;
+  // Degenerate check MUST precede the bounds check: with x0 === x1 the slack window
+  // collapses to 16px, so any realistic pointer position would be rejected as
+  // outside before the collapsed-axis branch could resolve it to index 0.
   if (x1 === x0 || span === 0) return 0;
+  if (px < x0 - slack || px > x1 + slack) return -1;
   const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
   return nearestIndex(points, points[0].ts + frac * span);
 }
