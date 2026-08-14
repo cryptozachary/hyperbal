@@ -1,6 +1,10 @@
-import { fmtUsd, fmtNum, fmtTime, cls, short, esc } from './js/format.js';
+import { fmtUsd, fmtNum, fmtTime, cls, short, esc } from './format.js';
+import * as api from './api.js';
+import { createChart } from './chart.js';
 
 const $ = (id) => document.getElementById(id);
+
+let chart = null;
 
 const state = {
   address: null, ws: null, pollTimer: null, refreshTimer: null, fillsReloadTimer: null,
@@ -8,13 +12,6 @@ const state = {
   syncResume: {}, // address -> { fills, funding } cursors from a truncated sync
   fills: { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false },
 };
-
-async function api(path, opts) {
-  const res = await fetch(path, opts);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
-  return body;
-}
 
 function setStatus(text, kind) { const el = $('status'); el.textContent = text; el.className = 'badge ' + (kind || ''); }
 function showError(msg) { const e = $('error'); e.textContent = msg; e.classList.remove('hidden'); }
@@ -85,8 +82,7 @@ async function loadFills(retried = false) {
   if (!state.address) { state.fills.rows = []; state.fills.total = 0; renderFills(); return; }
   const f = state.fills;
   try {
-    const q = `limit=${f.limit}&offset=${f.offset}&closesOnly=${f.closesOnly}`;
-    const data = await api(`/api/fills/${state.address}?${q}`);
+    const data = await api.getFills(state.address, f);
     // The page can fall off the end of the data (a purge elsewhere, another tab,
     // a server restart). Clamp back to the last real page instead of rendering an
     // empty table under a "401–300 of 300" range.
@@ -116,7 +112,7 @@ async function loadExportYears() {
   if (!state.address) { setExportEnabled(false); return; }
   setExportEnabled(true);
   try {
-    const { minTs, maxTs } = await api(`/api/range/${state.address}`);
+    const { minTs, maxTs } = await api.getRange(state.address);
     const opts = [];
     if (minTs != null && maxTs != null) {
       const first = new Date(minTs).getFullYear();
@@ -143,7 +139,7 @@ function downloadExport(format) {
     params.set('label', sel);
   }
   // Content-Disposition makes this a download rather than a navigation.
-  window.location = `/api/export/${state.address}.csv?${params}`;
+  window.location = api.exportUrl(state.address, params);
 }
 
 async function syncHistory() {
@@ -156,8 +152,7 @@ async function syncHistory() {
     // next run would restart at 0, re-scan what it already has, and stop in the
     // same place — so "run again to continue" would be a lie.
     const resume = state.syncResume[state.address];
-    const q = resume ? `?fillsFrom=${resume.fills}&fundingFrom=${resume.funding}` : '';
-    const r = await api(`/api/backfill/${state.address}${q}`, { method: 'POST' });
+    const r = await api.backfill(state.address, resume);
     if (r.skipped) {
       out.textContent = 'Nothing synced — this wallet is not on your saved list.';
       delete state.syncResume[state.address];
@@ -225,7 +220,7 @@ function resetDashboard() {
   $('fillsClosesBtn').classList.remove('active');
   $('fillsAllBtn').classList.add('active');
   renderFills();
-  drawChart();
+  chart.render(state.history, { series: state.series });
   clearError();
   setStatus('Enter a wallet', 'poll');
 }
@@ -234,7 +229,7 @@ async function loadAgents(address) {
   const panel = $('agentsPanel');
   panel.innerHTML = '';
   try {
-    const { agents } = await api(`/api/agents/${address}`);
+    const { agents } = await api.getAgents(address);
     if (!agents.length) { panel.innerHTML = '<div class="agents-empty">No agent wallets connected.</div>'; return; }
     for (const a of agents) {
       const row = document.createElement('div');
@@ -250,34 +245,13 @@ async function loadAgents(address) {
   }
 }
 
-// ---- Canvas chart (no library) ----
-function drawChart() {
-  const c = $('chart'); const ctx = c.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const w = c.clientWidth, h = 220;
-  c.width = w * dpr; c.height = h * dpr; ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-  const pts = state.history.map((p) => state.series === 'equity' ? p.equity : (p.unrealized_pnl ?? 0))
-    .map((v) => v == null ? 0 : v);
-  if (pts.length < 2) { ctx.fillStyle = '#8a97b1'; ctx.fillText('Not enough history yet.', 12, 24); return; }
-  const min = Math.min(...pts), max = Math.max(...pts), pad = 24;
-  const x = (i) => pad + (i / (pts.length - 1)) * (w - pad * 2);
-  const y = (v) => max === min ? h / 2 : pad + (1 - (v - min) / (max - min)) * (h - pad * 2);
-  // grid baseline
-  ctx.strokeStyle = '#222b3d'; ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad); ctx.stroke();
-  // line
-  ctx.strokeStyle = pts[pts.length - 1] >= pts[0] ? '#1fd09a' : '#ff5d6c';
-  ctx.lineWidth = 2; ctx.beginPath();
-  pts.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
-  ctx.stroke();
-  // last value label
-  ctx.fillStyle = '#e6ebf5';
-  ctx.fillText((state.series === 'equity' ? '$' : '') + pts[pts.length - 1].toFixed(2), w - pad - 60, y(pts[pts.length - 1]) - 6);
-}
-
 async function loadHistory() {
   if (!state.address) return;
-  try { const { points } = await api(`/api/history/${state.address}`); state.history = points; drawChart(); } catch {}
+  try {
+    const { points } = await api.getHistory(state.address);
+    state.history = points;
+    chart.render(state.history, { series: state.series });
+  } catch {}
 }
 
 function scheduleRefresh() {
@@ -319,7 +293,7 @@ async function refresh(showLoad = true) {
   if (!state.address) return;
   if (showLoad) setLoading(true);
   try {
-    const data = await api(`/api/account/${state.address}`);
+    const data = await api.getAccount(state.address);
     renderAccount(data);
     await loadHistory();
     await loadFills();
@@ -329,7 +303,7 @@ async function refresh(showLoad = true) {
 
 // ---- Wallet management ----
 async function loadWallets(selected) {
-  const { wallets } = await api('/api/wallets');
+  const { wallets } = await api.getWallets();
   state.walletMeta = {};
   const sel = $('walletSelect'); sel.innerHTML = '';
   for (const w of wallets) {
@@ -353,11 +327,12 @@ async function selectAddress(address) {
 
 async function init() {
   setStatus('Connecting…');
+  chart = createChart($('chart'));
   // chart toggle
   document.querySelectorAll('#chartToggle button').forEach((b) =>
     b.addEventListener('click', () => {
       document.querySelectorAll('#chartToggle button').forEach((x) => x.classList.remove('active'));
-      b.classList.add('active'); state.series = b.dataset.series; drawChart();
+      b.classList.add('active'); state.series = b.dataset.series; chart.render(state.history, { series: state.series });
     }));
   // fills filter toggle
   const setFillsFilter = (closesOnly, activeBtn) => {
@@ -385,13 +360,12 @@ async function init() {
   $('syncBtn').addEventListener('click', syncHistory);
 
   $('refreshBtn').addEventListener('click', () => refresh(true));
-  window.addEventListener('resize', drawChart);
 
   $('addBtn').addEventListener('click', async () => {
     const address = $('walletInput').value.trim().toLowerCase();
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) { showError('Invalid wallet address.'); return; }
     try {
-      const { resolved } = await api('/api/wallets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address }) });
+      const { resolved } = await api.addWallet(address);
       $('walletInput').value = '';
       const canonical = resolved?.address || address;
       await loadWallets(canonical);
@@ -406,7 +380,7 @@ async function init() {
     // Hyperliquid only re-serves a limited recent window.
     if (!confirm(`Delete ${name}?\n\nThis also erases its stored trade history and equity snapshots. This cannot be undone.`)) return;
     try {
-      await api(`/api/wallets/${a}`, { method: 'DELETE' });
+      await api.deleteWallet(a);
       await loadWallets();
       const next = $('walletSelect').value;
       if (next) await selectAddress(next);
@@ -416,11 +390,11 @@ async function init() {
   $('walletSelect').addEventListener('change', (e) => selectAddress(e.target.value));
 
   // bootstrap: saved wallets + default (resolve in case DEFAULT_WALLET is an agent address)
-  const { defaultWallet } = await api('/api/config');
+  const { defaultWallet } = await api.getConfig();
   let preferred = defaultWallet || undefined;
   if (defaultWallet) {
     try {
-      const { resolved } = await api('/api/wallets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: defaultWallet }) });
+      const { resolved } = await api.addWallet(defaultWallet);
       preferred = resolved?.address || defaultWallet;
     } catch {}
   }
