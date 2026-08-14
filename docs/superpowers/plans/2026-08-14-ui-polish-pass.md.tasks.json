@@ -5,7 +5,7 @@
     {
       "id": 1,
       "subject": "Task 1: Extract format.js with tests",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Move the six formatters out of app.js into a pure, node-testable module, adding fmtPct, fmtCompact and fmtAxisTime.\n\n**Files:**\n- Create: public/js/format.js, test/format.test.js\n- Modify: public/app.js:1-6, public/app.js:58, public/index.html:115\n\n**Verify:** `npm test`\n\n```json:metadata\n{\"files\": [\"public/js/format.js\", \"test/format.test.js\", \"public/app.js\", \"public/index.html\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"format.js imports cleanly in Node with no DOM globals\", \"fmtCompact renders $49k, $1.2M, $0 and negatives\", \"fmtAxisTime picks time-of-day under 36h and dates above\", \"dashboard renders identically\", \"npm test passes\"]}\n```"
     },
     {

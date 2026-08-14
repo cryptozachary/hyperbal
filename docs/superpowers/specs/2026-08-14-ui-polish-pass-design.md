@@ -103,10 +103,15 @@ never reaches into a panel's DOM; a panel never reads global state.
 `chart.js` is the strictest boundary:
 
 ```js
-createChart(canvasEl) -> { render(points, { series, range }), destroy() }
+createChart(canvasEl) -> { render(points, { series }), destroy() }
 // points: [{ ts, equity, unrealized_pnl, realized_pnl_cum }] — the snapshot row as stored
 // series: 'equity' | 'pnl'   (the main chart's toggle)
 ```
+
+The range pills are **not** an option on `render`. Selecting a range re-fetches a
+shorter `points` array via `?since=`; the chart plots whatever it is handed and
+derives its x-axis label format from that array's own `ts` span. Nothing about
+the chart needs to know which pill produced the data.
 
 The main chart plots `equity` or `unrealized_pnl`; card sparklines additionally
 read `realized_pnl_cum`, which is why `render` takes the whole snapshot row
