@@ -3,16 +3,13 @@ import * as account from './account.js';
 import * as fills from './fills.js';
 import * as exportsPanel from './exports.js';
 import * as wallets from './wallets.js';
-import { createChart } from './chart.js';
+import * as chartPanel from './chart-panel.js';
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  address: null, ws: null, pollTimer: null, refreshTimer: null,
-  series: 'equity', history: [], wsConnected: false,
+  address: null, ws: null, pollTimer: null, refreshTimer: null, wsConnected: false,
 };
-
-let chart = null;
 
 function setStatus(text, kind) {
   const el = $('status');
@@ -23,15 +20,6 @@ function showError(msg) { const e = $('error'); e.textContent = msg; e.classList
 function clearError() { $('error').classList.add('hidden'); }
 function setLoading(on) { $('loading').classList.toggle('hidden', !on); }
 
-async function loadHistory() {
-  if (!state.address) return;
-  try {
-    const { points } = await api.getHistory(state.address);
-    state.history = points;
-    chart.render(state.history, { series: state.series });
-  } catch {}
-}
-
 async function refresh(showLoad = true) {
   if (!state.address) return;
   if (showLoad) setLoading(true);
@@ -39,7 +27,7 @@ async function refresh(showLoad = true) {
     const data = await api.getAccount(state.address);
     clearError();
     account.render(data);
-    await loadHistory();
+    await chartPanel.load();
     await fills.load();
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
@@ -53,22 +41,21 @@ function scheduleRefresh() {
 // Clear every panel back to its empty state — used when the last wallet is deleted.
 function resetDashboard() {
   state.address = null;
-  state.history = [];
   account.reset();
   fills.reset();
   exportsPanel.reset();
   wallets.reset();
-  chart.render([], { series: state.series });
+  chartPanel.reset();
   clearError();
   setStatus('Enter a wallet', 'poll');
 }
 
 async function selectAddress(address) {
   state.address = address;
-  state.history = [];
   fills.setAddress(address);
   exportsPanel.setAddress(address);   // synchronous, in step with the others
   wallets.setCurrent(address);
+  chartPanel.setAddress(address);
   await refresh(true);
   await wallets.renderAgents(address);
   await exportsPanel.loadPeriods();   // same position as before, ordering preserved
@@ -110,15 +97,7 @@ function startPolling() {
 
 async function init() {
   setStatus('Connecting…');
-  chart = createChart($('chart'));
-
-  document.querySelectorAll('#chartToggle button').forEach((b) =>
-    b.addEventListener('click', () => {
-      document.querySelectorAll('#chartToggle button').forEach((x) => x.classList.remove('active'));
-      b.classList.add('active');
-      state.series = b.dataset.series;
-      chart.render(state.history, { series: state.series });
-    }));
+  chartPanel.mount();
 
   fills.mount({ onError: showError });
   exportsPanel.mount({ onSynced: () => fills.load() });
