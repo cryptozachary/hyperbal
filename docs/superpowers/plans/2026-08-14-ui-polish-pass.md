@@ -2195,6 +2195,9 @@ Append to `public/styles.css`:
 
 ```css
 #tableWrap,#fillsWrap{overflow-x:auto;max-height:420px;overflow-y:auto}
+/* `top:0` is relative to the scroll container, not the viewport, so this does not
+   fight the sticky .topbar — but it must set an OPAQUE background: .panel behind it
+   is a vertical gradient, so a transparent header would show rows sliding under it. */
 thead th{position:sticky;top:0;background:var(--surface-1);z-index:2}
 tbody tr{transition:background var(--dur-fast) var(--ease)}
 tbody tr:hover td{background:var(--surface-2)}

@@ -3,8 +3,11 @@
   --bg:#0b0e14; --bg2:#121722; --bg-glow:#1a2336;
   --surface-1:#161c2b; --surface-2:#1a2131; --surface-3:#10151f;
   --card-grad-end:#121624;
-  --btn-grad-1:#2a3550; --btn-grad-2:#1c2438;
+  --btn-raised-1:#2a3550; --btn-raised-2:#1c2438;
   --line:#222b3d; --line-soft:#1a2130;
+  /* Alpha blends of --bg. The hex-literal check can't see rgba(), so these are
+     declared here to stop each new overlay inventing its own. */
+  --scrim-70:rgba(11,14,20,.7); --scrim-50:rgba(11,14,20,.5); --scrim-62:rgba(4,6,10,.62);
 
   /* text */
   --text:#e6ebf5; --muted:#8a97b1;
@@ -32,12 +35,13 @@
 }
 
 /* Digits must not change width as live values tick, or the whole table jitters. */
-.card-value,td,th{font-variant-numeric:tabular-nums}
+.card-value,.card-sub,td,th{font-variant-numeric:tabular-nums}
 
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{
     animation-duration:.001ms !important; animation-iteration-count:1 !important;
     transition-duration:.001ms !important;
+    animation-delay:0s !important; transition-delay:0s !important;
   }
 }
 
@@ -45,7 +49,7 @@
 body{margin:0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:
   radial-gradient(1200px 600px at 20% -10%,var(--bg-glow) 0%,transparent 60%),var(--bg);color:var(--text)}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);
-  padding:var(--sp-3) var(--sp-5);border-bottom:1px solid var(--line);background:rgba(11,14,20,.7);
+  padding:var(--sp-3) var(--sp-5);border-bottom:1px solid var(--line);background:var(--scrim-70);
   position:sticky;top:0;backdrop-filter:blur(8px);flex-wrap:wrap}
 .brand{font-weight:700;letter-spacing:.3px}
 .controls{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
@@ -54,7 +58,7 @@ select,input,button{background:var(--bg2);color:var(--text);border:1px solid var
 input{min-width:280px}
 button{cursor:pointer;transition:border-color var(--dur-fast) var(--ease)}
 button:hover{border-color:var(--accent)}
-#refreshBtn{background:linear-gradient(180deg,var(--btn-grad-1),var(--btn-grad-2))}
+#refreshBtn{background:linear-gradient(180deg,var(--btn-raised-1),var(--btn-raised-2))}
 .badge{padding:var(--sp-1) var(--sp-3);border-radius:var(--r-pill);border:1px solid var(--line);font-size:var(--fs-sm);color:var(--muted)}
 .badge.live{color:var(--pos);border-color:var(--pos-a40)}
 .badge.poll{color:var(--warn);border-color:var(--warn-a40)}
@@ -82,7 +86,7 @@ th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppe
 .empty,.error{padding:var(--sp-5);text-align:center;color:var(--muted)}
 .error{color:var(--neg);border:1px solid var(--neg-a40);border-radius:var(--r-md);margin-top:14px}
 .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:rgba(11,14,20,.5);border-radius:var(--r-lg);font-size:16px;color:var(--muted)}
+  background:var(--scrim-50);border-radius:var(--r-lg);font-size:16px;color:var(--muted)}
 .hidden{display:none}
 .foot{text-align:center;color:var(--muted);padding:var(--sp-4);font-size:var(--fs-sm);border-top:1px solid var(--line)}
 @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}input{min-width:160px}}
