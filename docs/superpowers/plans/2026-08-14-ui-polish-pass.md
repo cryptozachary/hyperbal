@@ -2301,6 +2301,12 @@ git commit -m "feat(ui): card sparklines, 24h deltas and long/short split"
 - [ ] Below 760px each table scrolls horizontally inside its panel with the first column pinned; the page body does not scroll sideways
 - [ ] Trade History's empty state offers **Sync full history** inline
 - [ ] The dex collateral suffix stays visually secondary to the coin
+- [ ] **Carried from Task 5's review:** `fillsNext` and `setFilter` mutate
+      `view.offset` / `view.closesOnly` *before* a fetch that can fail, so a failed
+      click leaves the rows and the range label on the old page while the offset has
+      already advanced — two failed clicks then jump two pages on the next success,
+      and the filter highlight moves while the rows don't. Commit those fields only
+      after a successful fetch.
 
 **Verify:** `npm start`, then narrow the window to 375px → tables scroll inside their panels, page does not
 
