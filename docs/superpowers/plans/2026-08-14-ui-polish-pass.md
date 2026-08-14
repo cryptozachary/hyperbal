@@ -2076,8 +2076,11 @@ Append to `public/styles.css`:
 .chart-change.pos{color:var(--pos)} .chart-change.neg{color:var(--neg)}
 .pill{display:inline-flex;gap:2px;background:var(--surface-3);border:1px solid var(--line);
   border-radius:var(--r-md);padding:2px}
-.pill button{background:none;border:0;color:var(--muted);font-size:11px;
-  padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:11px}
+/* `font:inherit` is a shorthand that resets font-size, so it must come BEFORE the
+   size or the size is dead. Token, not a raw px — this file uses --fs-* throughout. */
+.pill button{background:none;border:0;color:var(--muted);font:inherit;
+  font-size:var(--fs-sm);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);cursor:pointer}
+.pill button:hover{color:var(--text)}
 .pill button.on{background:var(--surface-2);color:var(--accent)}
 ```
 

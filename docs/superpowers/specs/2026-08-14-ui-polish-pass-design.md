@@ -312,14 +312,24 @@ genuinely thin.
 
 Card sparklines reuse `chart.js`'s scale helpers rather than reimplementing them.
 
-**The sparklines need their own paint entry point.** `account.render(data)` takes
-the account payload, but sparklines read snapshot rows, which arrive from a
-different request that completes *after* the cards are painted — and on a wallet
-switch the history array is explicitly emptied first, so at `render` time there
-is nothing to draw from. `account.js` therefore exports a second, separate
-`renderSparks(points)`, called once the history load resolves. This keeps
-`render(data)` a pure function of its argument and avoids painting the cards
-twice per refresh.
+**The sparklines need their own paint entry point, and their own fetch.**
+`account.render(data)` takes the account payload, but sparklines read snapshot
+rows, which arrive from a different request that completes *after* the cards are
+painted — and on a wallet switch the history array is explicitly emptied first, so
+at `render` time there is nothing to draw from. `account.js` therefore exports a
+second, separate `renderSparks(points)`.
+
+It must **not** be fed from `chart-panel.js`'s history. That array is
+range-scoped: it shrinks when a range pill is clicked, and `load()` re-runs on
+every pill click. Reusing it would break two guarantees at once — the chart's
+"selecting a range redraws only the chart", and the cards' "deltas are fixed at
+24h regardless of the pill". A 24h delta computed by filtering a 7d array happens
+to be correct today only because 24h is the shortest pill; adding a 1h pill would
+silently under-report it with no error anywhere.
+
+So `app.js` issues its own `getHistory(address, now - 24h)` once per refresh and
+hands the result to `renderSparks`. Panels do not import each other; `app.js` is
+the only module that wires them together.
 
 ---
 
