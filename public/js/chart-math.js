@@ -134,19 +134,6 @@ export function computeScales(values, box) {
   };
 }
 
-// Binary search for the point whose ts is closest to `ts`. Points are ascending.
-export function nearestIndex(points, ts) {
-  if (!points.length) return -1;
-  let lo = 0, hi = points.length - 1;
-  if (ts <= points[lo].ts) return lo;
-  if (ts >= points[hi].ts) return hi;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (points[mid].ts <= ts) lo = mid; else hi = mid;
-  }
-  return ts - points[lo].ts <= points[hi].ts - ts ? lo : hi;
-}
-
 // Contiguous runs of drawable values. A null is a gap in the line, not a zero —
 // the old chart drew nulls as 0, which invented an observation that never happened.
 export function segments(values) {
@@ -201,8 +188,8 @@ export function pointerToIndex(px, plot, points, slack = 8) {
   const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
   // The x scale is index-based, not time-based (see computeScales.x) — invert that
   // same mapping here, or the crosshair drifts wherever snapshots are irregularly
-  // spaced in time, which is always. Math.ceil(v - 0.5) rounds halves DOWN, matching
-  // nearestIndex's tie-break-low convention; Math.max(0, ...) avoids returning -0.
+  // spaced in time, which is always. Math.ceil(v - 0.5) rounds halves down (a tie
+  // resolves to the earlier point); Math.max(0, ...) avoids returning -0.
   return Math.max(0, Math.ceil(frac * (points.length - 1) - 0.5));
 }
 

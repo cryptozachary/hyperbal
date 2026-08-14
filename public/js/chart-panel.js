@@ -41,7 +41,17 @@ function highlightRange(r) {
   document.querySelectorAll('#chartRange button').forEach((x) => x.classList.toggle('on', x.dataset.range === r));
 }
 
-export function setAddress(next) { address = next; history = []; }
+// Wallet switch: `history` is emptied above, but the readout painted from it
+// sticks around on screen until paint() runs again — and a failed load() never
+// calls paint() at all. Same reasoning as account.clearTrends(): without this, a
+// stale "▲ $12,430 · +8.1% over all time" would sit at full opacity, above a
+// chart dimmed to 35% by is-loading and beside sparklines hidden outright.
+export function setAddress(next) {
+  address = next;
+  history = [];
+  const el = $('chartChange');
+  if (el) { el.textContent = ''; el.className = 'chart-change'; }
+}
 
 export async function load() {
   if (!address) return;

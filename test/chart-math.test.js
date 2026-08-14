@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  niceStep, niceTicks, tickLabels, computeScales, nearestIndex, segments, rangeChange,
+  niceStep, niceTicks, tickLabels, computeScales, segments, rangeChange,
   pickXLabels, pointerToIndex, tooltipBox,
 } from '../public/js/chart-math.js';
 import { fmtUsd } from '../public/js/format.js';
@@ -72,16 +72,17 @@ test('niceTicks de-duplicates ticks toPrecision(12) collapses to the same value'
 
 test('tickLabels normalizes a narrow high range to one shared decimal', () => {
   // The live-app bug this fixes: equity ticks near $2,000 rendered as
-  // "$1.6k, $1.7k, $1.8k, $1.9k, $2k, $2.1k" — fmtCompact's trailing-.0 trim
-  // makes $2k read like a different, coarser precision than its neighbors.
+  // "$1.6k, $1.7k, $1.8k, $1.9k, $2k, $2.1k" — the old per-tick formatter's
+  // trailing-.0 trim made $2k read like a different, coarser precision than
+  // its neighbors.
   const t = niceTicks(1600, 2100);
   assert.deepEqual(tickLabels(t), ['$1.6k', '$1.7k', '$1.8k', '$1.9k', '$2.0k', '$2.1k']);
 });
 
 test('tickLabels keeps whole-number PnL ticks bare, not $2.00', () => {
-  // A second, independent case of the same root cause: fmtCompact's no-unit
-  // branch uses 2 decimals below $10 and 0 decimals at/above it, so ticks
-  // 0/2/4/6/8/10 mixed "$2.00" beside "$10" within one column.
+  // A second, independent case of the same root cause: the old formatter's
+  // no-unit branch used 2 decimals below $10 and 0 decimals at/above it, so
+  // ticks 0/2/4/6/8/10 mixed "$2.00" beside "$10" within one column.
   const t = niceTicks(0, 10);
   assert.deepEqual(tickLabels(t), ['$0', '$2', '$4', '$6', '$8', '$10']);
 });
@@ -276,19 +277,6 @@ test('computeScales centers a flat series', () => {
 test('computeScales survives an all-null series', () => {
   const s = computeScales([null, null], BOX);
   assert.ok(Number.isFinite(s.y(0)));
-});
-
-const PTS = [{ ts: 10 }, { ts: 20 }, { ts: 30 }, { ts: 100 }];
-
-test('nearestIndex finds the closest point', () => {
-  assert.equal(nearestIndex([], 5), -1);
-  assert.equal(nearestIndex([{ ts: 7 }], 999), 0);
-  assert.equal(nearestIndex(PTS, 20), 1);   // exact
-  assert.equal(nearestIndex(PTS, 0), 0);    // before start
-  assert.equal(nearestIndex(PTS, 500), 3);  // past end
-  assert.equal(nearestIndex(PTS, 22), 1);   // closer to 20
-  assert.equal(nearestIndex(PTS, 28), 2);   // closer to 30
-  assert.equal(nearestIndex(PTS, 65), 2);   // tie-ish, lower wins
 });
 
 test('segments splits on nulls and keeps original indices', () => {

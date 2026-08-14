@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const view = { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false };
 let address = null;
 let reloadTimer = null;
+let loadSeq = 0; // generation guard — same mySeq/want pattern as exports.js
 
 // Pre-migration rows have no dir; fall back to the raw HL side (B = bid/buy, A = ask/sell).
 const dirText = (f) => f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : '—');
@@ -80,6 +81,8 @@ function errorRow(tbody) {
 // untouched, with the toast as the only signal.
 export async function load(retried = false, pending = {}) {
   if (!address) { view.rows = []; view.total = 0; paint(); return; }
+  const want = address;
+  const mySeq = ++loadSeq;
   const offset = 'offset' in pending ? pending.offset : view.offset;
   const closesOnly = 'closesOnly' in pending ? pending.closesOnly : view.closesOnly;
   const showedSkeleton = view.rows.length === 0;
@@ -92,7 +95,11 @@ export async function load(retried = false, pending = {}) {
     skeletonRows($('fills').querySelector('tbody'), 7);
   }
   try {
-    const data = await api.getFills(address, { limit: view.limit, offset, closesOnly });
+    const data = await api.getFills(want, { limit: view.limit, offset, closesOnly });
+    // Stale-response guard: a wallet switch that landed after this call started, or
+    // a second, more recent load() (a poll's load(0) racing an "Older ›" click) must
+    // not commit its rows/offset over a newer one's — mirrors exports.js's pattern.
+    if (mySeq !== loadSeq || want !== address) return;
     // The page can fall off the end of the data (a purge elsewhere, another tab,
     // a server restart). Clamp back to the last real page instead of rendering an
     // empty table under a "401–300 of 300" range.
@@ -109,6 +116,7 @@ export async function load(retried = false, pending = {}) {
     view.total = data.total;
     paint();
   } catch (err) {
+    if (mySeq !== loadSeq || want !== address) return;
     if (showedSkeleton) errorRow($('fills').querySelector('tbody'));
     toast("Couldn't load trade history: " + errMsg(err), 'error');
   }

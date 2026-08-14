@@ -5,15 +5,9 @@
 
 import { fmtUsd, fmtAxisTime } from './format.js';
 import {
-  niceTicks, tickLabels, computeScales, nearestIndex, segments, rangeChange,
+  niceTicks, tickLabels, computeScales, segments,
   pickXLabels, pointerToIndex, tooltipBox,
 } from './chart-math.js';
-
-// Re-exported so consumers have one import for chart concerns.
-export {
-  niceTicks, tickLabels, computeScales, nearestIndex, segments, rangeChange,
-  pickXLabels, pointerToIndex, tooltipBox,
-};
 
 const CSS = getComputedStyle(document.documentElement);
 const token = (name, fallback) => (CSS.getPropertyValue(name) || '').trim() || fallback;

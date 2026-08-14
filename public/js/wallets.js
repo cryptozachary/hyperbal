@@ -9,8 +9,6 @@ let list = [];
 let current = null;
 let handlers = { onSelect: () => {}, onEmpty: () => {} };
 
-export const metaFor = (address) => meta[address];
-
 // Deterministic per-address color so a wallet is recognisable at a glance.
 function hueFor(address) {
   let h = 0;
@@ -118,11 +116,19 @@ export function setCurrent(address) {
   paintBadge(address);
 }
 
+let agentsSeq = 0; // generation guard — same mySeq/want pattern as exports.js
+
 export async function renderAgents(address) {
   const panel = $('agentsPanel');
   panel.innerHTML = '';
+  const want = address;
+  const mySeq = ++agentsSeq;
   try {
     const { agents } = await api.getAgents(address);
+    // Stale-response guard: a superseded call (two fast selections) or the wallet
+    // having been deleted mid-flight (reset() already cleared #agentsPanel and set
+    // current to something else) must not repaint over it.
+    if (mySeq !== agentsSeq || want !== current) return;
     if (!agents.length) {
       panel.innerHTML = '<div class="agents-empty">No agent wallets connected.</div>';
       return;
@@ -137,6 +143,7 @@ export async function renderAgents(address) {
       panel.appendChild(row);
     }
   } catch {
+    if (mySeq !== agentsSeq || want !== current) return;
     panel.innerHTML = '<div class="agents-empty">Couldn\'t load connected agents.</div>';
   }
 }

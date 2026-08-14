@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtUsd, fmtNum, fmtPct, fmtCompact, fmtAxisTime, fmtTime, cls, short, esc, changeReadout } from '../public/js/format.js';
+import { fmtUsd, fmtNum, fmtPct, fmtAxisTime, fmtTime, cls, short, esc, changeReadout } from '../public/js/format.js';
 
 test('fmtUsd handles sign, nulls and rounding', () => {
   assert.equal(fmtUsd(null), '—');
@@ -21,23 +21,6 @@ test('fmtPct always carries a sign', () => {
   assert.equal(fmtPct(-3.6), '-3.60%');
   assert.equal(fmtPct(0), '+0.00%');
   assert.equal(fmtPct(NaN), '—');
-});
-
-test('fmtCompact abbreviates for axis labels', () => {
-  assert.equal(fmtCompact(0), '$0');
-  assert.equal(fmtCompact(612.44), '$612');
-  assert.equal(fmtCompact(5.5), '$5.50');
-  assert.equal(fmtCompact(49000), '$49k');
-  assert.equal(fmtCompact(1500), '$1.5k');
-  assert.equal(fmtCompact(1234567), '$1.2M');
-  assert.equal(fmtCompact(-49000), '-$49k');
-  assert.equal(fmtCompact(null), '—');
-  assert.equal(fmtCompact(999.4), '$999');
-  assert.equal(fmtCompact(999.5), '$1k');
-  assert.equal(fmtCompact(999499), '$999k');
-  assert.equal(fmtCompact(999500), '$1M');
-  assert.equal(fmtCompact(999499999), '$999M');
-  assert.equal(fmtCompact(999500000), '$1B');
 });
 
 // Locale-independent: assert the shape of the branch, not the exact string.

@@ -127,20 +127,30 @@ async function init() {
   $('refreshBtn').addEventListener('click', () => refresh(true));
 
   // bootstrap: saved wallets + default (resolve in case DEFAULT_WALLET is an agent address)
-  const { defaultWallet } = await api.getConfig();
-  let preferred = defaultWallet || undefined;
-  if (defaultWallet) {
-    try {
-      const { resolved } = await api.addWallet(defaultWallet);
-      preferred = resolved?.address || defaultWallet;
-    } catch {}
+  let first;
+  try {
+    const { defaultWallet } = await api.getConfig();
+    let preferred = defaultWallet || undefined;
+    if (defaultWallet) {
+      try {
+        const { resolved } = await api.addWallet(defaultWallet);
+        preferred = resolved?.address || defaultWallet;
+      } catch {}
+    }
+    await wallets.load(preferred);
+    first = wallets.selectedValue() || preferred;
+  } catch (err) {
+    // getConfig/wallets.load rejecting (server restarting, a cold start, a 500)
+    // used to leave init() itself rejected, so connectWs()/startPolling() below
+    // never ran — status stuck on "Connecting…" with no reconnect loop and no way
+    // back but a manual reload. Show the error but still start both, so the app
+    // recovers on its own once the server answers.
+    showError(errMsg(err));
   }
-  await wallets.load(preferred);
   connectWs();
   startPolling();
-  const first = wallets.selectedValue() || preferred;
   if (first) await selectAddress(first);
-  else setStatus('Enter a wallet', 'poll');
+  else if ($('error').classList.contains('hidden')) setStatus('Enter a wallet', 'poll');
 }
 
 init();

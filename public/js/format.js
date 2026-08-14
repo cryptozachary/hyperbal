@@ -11,22 +11,6 @@ export const fmtPct = (n, d = 2) =>
 
 export const fmtTime = (ts) => (ts == null ? '—' : new Date(ts).toLocaleString());
 
-const trimUnit = (v) => (v < 10 ? v.toFixed(1) : String(Math.round(v))).replace(/\.0$/, '');
-
-// Axis labels need to fit in ~40px, so full currency formatting won't do. Thresholds sit
-// at the point where trimUnit's rounding flips to the next unit, not at the round number
-// itself, so e.g. 999999 reads as $1M rather than $1000k.
-export const fmtCompact = (n) => {
-  if (n == null || !Number.isFinite(n)) return '—';
-  const a = Math.abs(n);
-  const sign = n < 0 ? '-' : '';
-  if (a === 0) return '$0';
-  if (a >= 999.5e6) return `${sign}$${trimUnit(a / 1e9)}B`;
-  if (a >= 999.5e3) return `${sign}$${trimUnit(a / 1e6)}M`;
-  if (a >= 999.5) return `${sign}$${trimUnit(a / 1e3)}k`;
-  return `${sign}$${a < 10 ? a.toFixed(2) : String(Math.round(a))}`;
-};
-
 // The x axis means something different at 24h than at two years, so the label follows the span.
 export const fmtAxisTime = (ts, spanMs) => {
   if (ts == null || !Number.isFinite(spanMs)) return '—';

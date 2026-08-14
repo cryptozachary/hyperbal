@@ -85,23 +85,24 @@ build step, no new dependency.
 
 | Module | Owns | Depends on |
 |---|---|---|
-| `format.js` | `fmtUsd`, `fmtNum`, `fmtPct`, `fmtTime`, `fmtCompact`, `cls`, `short`, `esc` | nothing — pure, no DOM |
+| `format.js` | `fmtUsd`, `fmtNum`, `fmtPct`, `fmtTime`, `changeReadout`, `cls`, `short`, `esc` | nothing — pure, no DOM |
 | `api.js` | the `fetch` wrapper; one named function per route; the only file that knows route strings | nothing |
-| `chart-math.js` | pure geometry: ticks, scales, nearest-point, segments, range change | nothing — pure, no DOM |
+| `chart-math.js` | pure geometry: ticks, tick labels, scales, segments, range change | nothing — pure, no DOM |
 | `chart.js` | canvas painting: gridlines, area fill, line, crosshair, tooltip, sparse-data notice, sparklines | `format.js`, `chart-math.js` |
-| `chart-panel.js` | the chart's own state — history, series, range — plus its toggle and range wiring | `api.js`, `chart.js` |
-| `account.js` | summary cards and positions table | `format.js` |
-| `fills.js` | trade history table, filter, pager, live-append reload | `format.js`, `api.js` |
-| `wallets.js` | switcher popover: list, select, add, delete-with-confirm | `api.js`, `feedback.js` |
+| `chart-panel.js` | the chart's own state — history, series, range — plus its toggle and range wiring | `api.js`, `chart.js`, `chart-math.js`, `format.js`, `feedback.js` |
+| `account.js` | summary cards and positions table | `format.js`, `chart.js`, `chart-math.js` |
+| `fills.js` | trade history table, filter, pager, live-append reload | `format.js`, `api.js`, `feedback.js` |
+| `wallets.js` | switcher popover: list, select, add, delete-with-confirm | `api.js`, `format.js`, `feedback.js` |
 | `exports.js` | period picker, sync button, download links | `api.js`, `feedback.js` |
-| `feedback.js` | toasts, skeletons, confirm dialog, status badge | nothing |
+| `feedback.js` | toasts, skeletons, confirm dialog, status badge | `format.js` |
 | `app.js` | `state`, WebSocket, fallback polling, wiring, bootstrap | all of the above |
 
 ### Interfaces
 
 `app.js` never reaches into a panel's DOM; a panel never reads global state, and
 **no panel imports `app.js`** — behavior arrives as injected handlers
-(`onSelect`, `onError`, `onEmpty`, `onSynced`). That last rule is what keeps the
+(`onSelect`, `onEmpty`, `onSynced`). No panel accepts an `onError`; panels report
+their own failures directly via `feedback.js`'s `toast()`. That last rule is what keeps the
 import graph a DAG; `app.js` ends in a bare `init()` call, so a cycle back into
 it would fail at module-evaluation time rather than degrade gracefully.
 
@@ -156,7 +157,7 @@ read `realized_pnl_cum`, which is why `render` takes the whole snapshot row
 rather than a pre-projected series.
 
 It knows nothing about wallets, the API, or the socket. Its pure geometry helpers
-(`niceTicks`, `computeScales`, `nearestIndex`) are exported for testing.
+(`niceTicks`, `computeScales`) are exported for testing.
 
 ### Data flow
 
@@ -192,9 +193,10 @@ files unchanged, comments included:
 - **Space:** `--sp-1`…`--sp-6` (4/8/12/16/24/32). Today nine different padding
   values do the work of five.
 - **Radius:** `--r-sm` 8, `--r-md` 10, `--r-lg` 14, `--r-pill` 999.
-- **Type:** `--fs-xs` 10 … `--fs-2xl` 26, plus `--num`
-  (`font-variant-numeric: tabular-nums`) applied to every numeric cell and card
-  value.
+- **Type:** `--fs-xs` 10 … `--fs-xl` 21. A custom property cannot hold a
+  property name, so there is no `--num` token — `styles.css:38` applies
+  `font-variant-numeric: tabular-nums` directly to every numeric cell and card
+  value, which is correct as is.
 - **Motion:** `--dur-fast` 120ms, `--dur` 180ms, one shared easing — all disabled
   under `prefers-reduced-motion`.
 - **Breakpoints:** two, deliberately. **760px** (the existing one) governs the
@@ -261,8 +263,10 @@ reads the element's CSS box, and DPR scaling works as it does today.
 
 ### Scales
 
-Y ticks from a nice-number algorithm (1/2/5 × 10ⁿ) targeting 4–5 gridlines, range
-padded 5% so the line never touches the frame. A flat series (min === max)
+Y ticks from a nice-number algorithm (1/2/5 × 10ⁿ) targeting 7 gridlines — a
+lower target such as 5 undershoots more often than intuition suggests, since
+`niceStep` always rounds up to the next 1/2/5 (see the comment on `niceTicks` in
+`chart-math.js`) — range padded 5% so the line never touches the frame. A flat series (min === max)
 centers the line in a ±1% band rather than dividing by zero — today's `y()`
 already special-cases this and the behavior carries over.
 
@@ -289,8 +293,7 @@ and they never are, since they accrue in dense bursts while the dashboard is ope
 and not at all between sessions. Measured on a realistic series (four snapshots
 90s apart, a three-day gap, four more), that version returned the wrong point for
 **71% of pixels**: hovering a visible vertex described a point three positions
-away. `nearestIndex` remains in `chart-math.js` for `rangeChange` and is not part
-of the hover path.
+away.
 
 ### Range
 
@@ -378,14 +381,17 @@ down the page.
 `npm test` must stay green. No server, `db.js`, or `export.js` changes are in
 scope, so no existing test should need to move.
 
-New `node:test` files — the first frontend tests in the repo. Both targets are
-pure functions, so neither needs a DOM or a canvas:
+New `node:test` files — the first frontend tests in the repo. These targets are
+pure functions, so none need a DOM or a canvas:
 
 - **`test/format.test.js`** — currency formatting, negatives, nulls, and
-  `fmtCompact` axis labels (`$49k`, `$1.2M`, sub-thousand values).
-- **`test/chart.test.js`** — `niceTicks` across zero-spanning, flat, and
-  sub-unit ranges; `computeScales` when `min === max`; `nearestIndex` on empty,
-  single-point, exact-match, and out-of-range input.
+  `changeReadout`'s sign/arrow tie-breaks.
+- **`test/chart-math.test.js`** — `niceTicks` across zero-spanning, flat, and
+  sub-unit ranges; `tickLabels`' precision/collision handling; `computeScales`
+  when `min === max`; the crosshair's pointer-to-index and tooltip-placement
+  geometry.
+- **`test/api.test.js`** — the `fetch` wrapper's error classification
+  (`offline` vs. an HTTP status) and its route construction per endpoint.
 
 ### Manual
 
