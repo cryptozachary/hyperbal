@@ -10,8 +10,11 @@ export function niceStep(raw) {
   return nice * base;
 }
 
-// Tick values inside [min, max], aiming for `target` gridlines.
-export function niceTicks(min, max, target = 5) {
+// Tick values inside [min, max], aiming for `target` gridlines. Default of 7 (rather
+// than the more obvious 5) keeps the floor at >= 3 ticks across realistic padded
+// ranges: niceStep always rounds up to the next 1/2/5, so a smaller target divisor
+// under-shoots the count more often than intuition suggests.
+export function niceTicks(min, max, target = 7) {
   if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
   if (min === max) {
     const p = Math.abs(min) * 0.01 || 1;
@@ -20,8 +23,17 @@ export function niceTicks(min, max, target = 5) {
   const step = niceStep((max - min) / Math.max(1, target - 1));
   const ticks = [];
   const first = Math.ceil(min / step) * step;
-  // Float error can drop the last tick; nudge the bound by a step epsilon.
-  for (let v = first; v <= max + step * 1e-9; v += step) ticks.push(Number(v.toPrecision(12)));
+  // The loop bound is nudged by a step epsilon so float accumulation error in `v`
+  // doesn't drop the last in-range tick.
+  // Separately, toPrecision(12) below only cleans up each pushed value for display
+  // (e.g. 0.30000000000000004 -> 0.3) — it does nothing to protect the loop bound.
+  for (let v = first; v <= max + step * 1e-9; v += step) {
+    const rounded = Number(v.toPrecision(12));
+    // toPrecision(12) can collapse two distinct raw values to the same rounded tick
+    // once `step` falls below 12-significant-figure resolution; skip the duplicate.
+    if (ticks.length && rounded === ticks[ticks.length - 1]) continue;
+    ticks.push(rounded);
+  }
   return ticks;
 }
 
@@ -104,17 +116,21 @@ export function pickXLabels(n) {
 // the forgiveness band beyond each edge, so the crosshair doesn't drop out the
 // instant the cursor grazes the axis.
 //
-// The degenerate check (zero-width plot or zero span) runs before the slack-bounds
+// The degenerate check (x1 === x0, a zero-width plot) runs before the slack-bounds
 // rejection: a zero-width plot collapses the entire x axis onto a single line, so
 // any pointer position "hits" it and should resolve to index 0 rather than being
 // rejected for falling outside a band that is only 2*slack wide around one point.
-export function pointerToIndex(px, plot, points, span, slack = 8) {
+export function pointerToIndex(px, plot, points, slack = 8) {
   if (!points.length) return -1;
   const { x0, x1 } = plot;
-  if (x1 === x0 || span === 0) return 0;
+  if (x1 === x0) return 0;
   if (px < x0 - slack || px > x1 + slack) return -1;
   const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
-  return nearestIndex(points, points[0].ts + frac * span);
+  // The x scale is index-based, not time-based (see computeScales.x) — invert that
+  // same mapping here, or the crosshair drifts wherever snapshots are irregularly
+  // spaced in time, which is always. Math.ceil(v - 0.5) rounds halves DOWN, matching
+  // nearestIndex's tie-break-low convention; Math.max(0, ...) avoids returning -0.
+  return Math.max(0, Math.ceil(frac * (points.length - 1) - 0.5));
 }
 
 // Where the tooltip box goes: to the right of the crosshair normally, flipped to the
