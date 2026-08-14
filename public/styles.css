@@ -76,8 +76,10 @@ main{max-width:1100px;margin:0 auto;padding:var(--sp-5);position:relative}
 h2{font-size:var(--fs-lg);margin:0 0 10px}
 .toggle button{padding:var(--sp-1) var(--sp-3);border-radius:var(--r-sm);font-size:var(--fs-sm)}
 .toggle button.active{border-color:var(--accent);color:var(--accent)}
-canvas{width:100%;display:block;height:280px}
-@media(max-width:760px){canvas{height:200px}}
+/* Scoped to #chart, not the bare element selector: Task 10 adds small sparkline
+   canvases elsewhere on the page that must not inherit a 280px chart height. */
+#chart{width:100%;display:block;height:280px}
+@media(max-width:760px){#chart{height:200px}}
 table{width:100%;border-collapse:collapse}
 th,td{padding:var(--sp-3) var(--sp-2);text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}

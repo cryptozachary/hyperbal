@@ -44,7 +44,12 @@ export function computeScales(values, box) {
   const finite = values.filter((v) => v != null && Number.isFinite(v));
   let min, max;
   if (!finite.length) { min = 0; max = 1; }
-  else { min = Math.min(...finite); max = Math.max(...finite); }
+  else {
+    // Spreading into Math.min/max blows the call stack around ~125k points
+    // (~87 days of continuous viewing); reduce has no such ceiling.
+    min = finite.reduce((a, b) => (b < a ? b : a), Infinity);
+    max = finite.reduce((a, b) => (b > a ? b : a), -Infinity);
+  }
   if (min === max) {
     const p = Math.abs(min) * 0.01 || 1;
     min -= p; max += p;

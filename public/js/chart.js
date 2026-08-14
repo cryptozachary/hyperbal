@@ -3,7 +3,7 @@
 // side: it reads CSS custom properties at module scope, which is why chart-math.js
 // can't just be inlined here and tested directly.
 
-import { fmtCompact, fmtAxisTime } from './format.js';
+import { fmtCompact, fmtUsd, fmtAxisTime } from './format.js';
 import {
   niceTicks, computeScales, nearestIndex, segments, rangeChange,
   pickXLabels, pointerToIndex, tooltipBox,
@@ -30,16 +30,45 @@ const PAD = { padLeft: 52, padRight: 14, padTop: 18, padBottom: 26 };
 
 const valueOf = (p, series) => (series === 'equity' ? p.equity : p.unrealized_pnl);
 
+// fmtCompact is lossy above $999.50, so a narrow range (e.g. equity sitting near
+// $2,008 with $10 of noise) collapses every tick to the same string — "$2k" five
+// times tells the user nothing about a $400 move. Fall back to full precision for
+// the whole axis when abbreviating would repeat a label; which formatter to use is
+// the chart's call, not chart-math's, so this lives here rather than in niceTicks.
+function tickLabels(ticks) {
+  const compact = ticks.map(fmtCompact);
+  return new Set(compact).size === compact.length ? compact : ticks.map(fmtUsd);
+}
+
+// The series being empty and there being no snapshots at all are different facts,
+// and conflating them tells a user with a year of equity history to "wait for data"
+// when they toggle to PnL and their early snapshots simply predate PnL capture.
+function emptyMessage(total, drawable, series) {
+  if (total === 0) return ['No snapshots yet.', 'Snapshots accrue while the dashboard is open.'];
+  if (drawable === 0 && series === 'pnl') {
+    return ['No unrealized PnL recorded.', 'Snapshots taken before PnL capture carry no value.'];
+  }
+  if (drawable === 0) return ['No values in this range.', 'Snapshots accrue while the dashboard is open.'];
+  return [`Only ${drawable} point in this range.`, 'Snapshots accrue while the dashboard is open.'];
+}
+
 export function createChart(canvas) {
   let points = [];
   let opts = { series: 'equity' };
 
   function draw() {
+    // An unlaid-out canvas (0 width/height — e.g. mid wallet-switch, or before the
+    // panel has been given layout) would otherwise compute negative coordinates and
+    // silently paint nothing. Bail rather than draw an invisible chart.
+    if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
+
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    canvas.width = w * dpr; canvas.height = h * dpr;
+    // Round, not truncate: at a fractional DPR, floor-by-cast would leave an
+    // unpainted rightmost/bottom column in the backing store.
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.font = '10px system-ui, sans-serif';
@@ -52,13 +81,13 @@ export function createChart(canvas) {
 
     if (drawable.length < 2) {
       ctx.fillStyle = COLORS.muted;
+      // The empty-state text is the panel's only visible content in this state —
+      // give it a real font size instead of inheriting the 10px axis label font.
+      ctx.font = '13px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      const n = drawable.length;
-      ctx.fillText(
-        n === 0 ? 'No snapshots yet.' : `Only ${n} snapshot in this range.`,
-        w / 2, h / 2 - 6,
-      );
-      ctx.fillText('Snapshots accrue while the dashboard is open.', w / 2, h / 2 + 10);
+      const [line1, line2] = emptyMessage(points.length, drawable.length, opts.series);
+      ctx.fillText(line1, w / 2, h / 2 - 6);
+      ctx.fillText(line2, w / 2, h / 2 + 10);
       ctx.textAlign = 'left';
       return;
     }
@@ -73,11 +102,15 @@ export function createChart(canvas) {
     ctx.lineWidth = 1;
     ctx.fillStyle = COLORS.muted;
     ctx.textAlign = 'right';
-    for (const t of niceTicks(s.min, s.max)) {
+    ctx.textBaseline = 'middle';
+    const ticks = niceTicks(s.min, s.max);
+    const labels = tickLabels(ticks);
+    ticks.forEach((t, i) => {
       const y = Math.round(s.y(t)) + 0.5;
       ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-      ctx.fillText(fmtCompact(t), x0 - 8, y + 3);
-    }
+      ctx.fillText(labels[i], x0 - 8, y);
+    });
+    ctx.textBaseline = 'alphabetic';
 
     // --- x labels: first, middle, last ---
     const span = points[n - 1].ts - points[0].ts;
@@ -147,49 +180,90 @@ export function createChart(canvas) {
     return `rgba(${r},${g},${b},${a})`;
   }
 
-  const onResize = () => draw();
+  // A draw failure must not take the page down with it, and must not leave a
+  // half-painted canvas that reads as "no data" rather than "broken": draw() can
+  // throw after gridlines/labels are already on the canvas (e.g. a bad hex token
+  // makes addColorStop throw), so the fallback clears everything first and resets
+  // the context state draw() may have left mid-change (a right-aligned fallback
+  // string at x=12 renders almost entirely off-canvas).
+  function safeDraw() {
+    try {
+      draw();
+    } catch (e) {
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '13px system-ui, sans-serif';
+        ctx.fillStyle = COLORS.muted;
+        ctx.fillText("Couldn't draw the chart.", 12, 24);
+      }
+      console.error(e);
+    }
+  }
+
+  // Every resize event reassigns canvas.width, which reallocates the backing
+  // store — coalesce bursts (window drag) into one draw per frame, and route
+  // through the same guarded path so a mid-resize throw doesn't go uncaught.
+  let resizeFrame = null;
+  const onResize = () => {
+    if (resizeFrame != null) return;
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null;
+      safeDraw();
+    });
+  };
   window.addEventListener('resize', onResize);
 
   return {
     render(nextPoints, nextOpts = {}) {
       points = nextPoints || [];
       opts = { ...opts, ...nextOpts };
-      // A draw failure must not take the page down with it.
-      try { draw(); } catch (e) {
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = COLORS.muted;
-        ctx.fillText("Couldn't draw the chart.", 12, 24);
-        console.error(e);
-      }
+      safeDraw();
     },
-    destroy() { window.removeEventListener('resize', onResize); },
+    destroy() {
+      window.removeEventListener('resize', onResize);
+      if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
+    },
   };
 }
 
 // Small inline trend line for the summary cards.
 export function drawSparkline(canvas, values, color) {
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  canvas.width = w * dpr; canvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  const runs = segments(values);
-  if (!runs.length) return;
-  const s = computeScales(values, { width: w, height: h, padLeft: 1, padRight: 1, padTop: 3, padBottom: 3 });
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = 'round';
-  for (const run of runs) {
-    if (run.length === 1) {
+  // Guard against the expected transient shapes: sparklines arrive from a request
+  // that resolves after the cards paint, and history is cleared on wallet switch,
+  // so undefined/empty values are routine, not exceptional. Also bail on a canvas
+  // that hasn't been laid out yet rather than silently paint an invisible line.
+  if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
+  try {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const vals = values || [];
+    const runs = segments(vals);
+    if (!runs.length) return;
+    const s = computeScales(vals, { width: w, height: h, padLeft: 1, padRight: 1, padTop: 3, padBottom: 3 });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    for (const run of runs) {
+      if (run.length === 1) {
+        ctx.beginPath();
+        ctx.arc(s.x(run[0].i, vals.length), s.y(run[0].v), 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        continue;
+      }
       ctx.beginPath();
-      ctx.arc(s.x(run[0].i, values.length), s.y(run[0].v), 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      continue;
+      run.forEach((p, k) => (k ? ctx.lineTo(s.x(p.i, vals.length), s.y(p.v)) : ctx.moveTo(s.x(p.i, vals.length), s.y(p.v))));
+      ctx.stroke();
     }
-    ctx.beginPath();
-    run.forEach((p, k) => (k ? ctx.lineTo(s.x(p.i, values.length), s.y(p.v)) : ctx.moveTo(s.x(p.i, values.length), s.y(p.v))));
-    ctx.stroke();
+  } catch (e) {
+    console.error(e);
   }
 }
