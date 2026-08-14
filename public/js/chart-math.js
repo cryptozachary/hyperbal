@@ -40,21 +40,56 @@ export function niceTicks(min, max, target = 7) {
   return ticks;
 }
 
+// Format every tick at a fixed decimal count with a fixed unit/suffix, with no
+// zero exemption — distinctness must be judged on this raw set. Exempting zero
+// first would let a bare "$0" make an otherwise-colliding set (e.g. five ticks
+// that all round to +/-$0.00) look distinct, which is how a set of identical
+// labels used to slip past the dedup guard. Returns null if no formatted set in
+// [0, maxDecimals] is fully distinct.
+function distinctLabelsAt(ticks, unit, suffix, maxDecimals) {
+  for (let d = 0; d <= maxDecimals; d++) {
+    const labels = ticks.map((t) => {
+      const str = (t / unit).toFixed(d); // e.g. "-0.00", "4.12", "0.005"
+      const neg = str.startsWith('-');
+      const digits = neg ? str.slice(1) : str;
+      // A tick that rounds to zero at this precision must not print "-$0...":
+      // suppress the sign toFixed's own "-0.00" would otherwise carry through.
+      const zero = /^0(\.0*)?$/.test(digits);
+      return `${neg && !zero ? '-' : ''}$${digits}${suffix}`;
+    });
+    if (new Set(labels).size === labels.length) return labels;
+  }
+  return null;
+}
+
 // Format a set of axis ticks (from niceTicks) so the whole column reads at one
 // precision. Precision is a property of the axis, not any single tick, so it's
 // derived once from the whole set rather than formatted per-value and repaired
-// after the fact — that per-value approach has two independent failure modes:
-// a narrow high range (equity near $2,008) collapses every tick to the same
-// abbreviation ("$2k" x5, telling the user nothing about a $400 move), and a
-// small range straddling a formatter's own rounding boundary mixes precisions
-// within one column ($2.00 next to $10, from PnL ticks 2/4/6/8/10). Both are
-// fixed the same way: pick one unit (none/k/M/B, from the largest tick's
-// magnitude) and the fewest decimals — 0, then 1 — that keep every formatted
-// tick distinct; if even one decimal can't tell them apart (e.g. a ~1% window
-// around $2,000, where the ticks differ by fractions of a percent of the
-// unit), fall back to full, un-abbreviated precision. Zero is always rendered
-// bare ("$0"), never "$0.0M" — it's unambiguous at any precision, and forcing
-// the unit's decimals onto it would be noise, not information.
+// after the fact — that per-value approach has failure modes at both ends of
+// the magnitude range: a narrow high range (equity near $2,008) collapses
+// every tick to the same abbreviation ("$2k" x5, telling the user nothing
+// about a $400 move), and dust-level PnL near zero either mixes precisions
+// ($4.12 next to $4.1) or, worse, collapses several distinct sub-cent ticks to
+// an identical "$0" — six duplicate labels, not five.
+//
+// Two different unit regimes need two different escalation strategies:
+//
+// - Abbreviated units (k/M/B) cap escalation at 1 decimal. A second decimal
+//   there buys little (it would turn "$1,990 ... $2,010" into "$1.990k ...
+//   $2.010k") and reads worse than just falling back to full, un-abbreviated
+//   dollars — so failing at 1 decimal falls back to fmtUsd instead of trying
+//   more decimals on the abbreviation.
+// - The un-abbreviated range (unit === 1, no suffix) has no "full precision"
+//   above it to fall back to, so it keeps escalating past cents instead:
+//   dust equity/PnL is a real shape in this app's data (snapshots capture
+//   whatever Hyperliquid returns, sub-cent noise included), and fmtUsd's
+//   fixed, un-minimum'd 2-decimal format can neither separate it nor render
+//   it consistently.
+//
+// Either way, zero is swapped to bare "$0" only in the winning, already-
+// distinct set, never used to decide distinctness itself (see
+// distinctLabelsAt above) — that ordering is what stops a bare "$0" from
+// masking a real collision between two other ticks.
 export function tickLabels(ticks) {
   if (!ticks.length) return [];
   const maxAbs = ticks.reduce((m, t) => Math.max(m, Math.abs(t)), 0);
@@ -63,18 +98,11 @@ export function tickLabels(ticks) {
     maxAbs >= 999.5e3 ? [1e6, 'M'] :
     maxAbs >= 999.5 ? [1e3, 'k'] : [1, ''];
 
-  const format = (decimals) => ticks.map((t) => {
-    if (t === 0) return '$0';
-    const scaled = t / unit;
-    const sign = scaled < 0 ? '-' : '';
-    return `${sign}$${Math.abs(scaled).toFixed(decimals)}${suffix}`;
-  });
+  const winner = suffix
+    ? distinctLabelsAt(ticks, unit, suffix, 1) || ticks.map(fmtUsd)
+    : distinctLabelsAt(ticks, 1, '', 10) || ticks.map(fmtUsd);
 
-  for (const decimals of [0, 1]) {
-    const labels = format(decimals);
-    if (new Set(labels).size === labels.length) return labels;
-  }
-  return ticks.map(fmtUsd);
+  return winner.map((label, i) => (ticks[i] === 0 ? '$0' : label));
 }
 
 // Maps series values into a plot box. `x` is index-based (snapshots are irregular

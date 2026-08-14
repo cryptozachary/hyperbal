@@ -116,24 +116,132 @@ test('tickLabels needs no decimals when scaled ticks are already whole', () => {
   assert.deepEqual(tickLabels(t), ['$48k', '$49k', '$50k', '$51k', '$52k']);
 });
 
-test('tickLabels never returns two identical labels', () => {
-  const ranges = [[1600, 2100], [0, 10], [-5, 20], [0, 25], [0, 1.5e6], [1990, 2010], [48000, 52000]];
-  for (const [min, max] of ranges) {
-    const labels = tickLabels(niceTicks(min, max));
-    assert.equal(new Set(labels).size, labels.length, `duplicate for [${min}, ${max}]: ${labels}`);
-  }
+// The abbreviated (k/M/B) path caps its own escalation at 1 decimal and falls
+// back to full, un-abbreviated dollars rather than trying more decimals on the
+// unit — this is what keeps [1990, 2010] reading as "$1,990 ... $2,010" instead
+// of a comparatively unreadable "$1.990k ... $2.010k". The un-abbreviated path
+// (no suffix at all) has no such fallback available, so cents-and-below ranges
+// need real escalation instead, which the next four tests cover: two- and
+// even four-decimal PnL, a range that used to collapse six ticks to one
+// duplicated "$0"/"-$0", and a sub-cent dust range.
+
+test('tickLabels uses uniform cents for a narrow negative PnL range', () => {
+  // Previously: -$4.12 | -$4.11 | -$4.1 | -$4.09 | -$4.08 — a lone tick lost
+  // its trailing zero exactly like the old $2k-among-$2.1k bug, just at unit 1
+  // instead of k.
+  const t = niceTicks(-4.12, -4.08);
+  assert.deepEqual(tickLabels(t), ['-$4.12', '-$4.11', '-$4.10', '-$4.09', '-$4.08']);
 });
 
-test('tickLabels keeps one suffix and one decimal count across a unit-scaled set', () => {
-  // Every non-zero label in a unit-scaled column must share the suffix and the
-  // decimal count — that's the second bug (the first is the dedup check above).
-  const labels = tickLabels(niceTicks(0, 1.5e6)).filter((l) => l !== '$0');
-  assert.ok(labels.length > 0);
-  for (const l of labels) assert.match(l, /^\$\d+\.\dM$/, `inconsistent precision/suffix: ${l}`);
+test('tickLabels uses uniform cents for a wider negative PnL range', () => {
+  const t = niceTicks(-0.15, -0.02);
+  const labels = tickLabels(t);
+  assert.equal(new Set(labels).size, labels.length);
+  assert.ok(labels.every((l) => /^-\$\d+\.\d\d$/.test(l)), `not uniform 2-decimal: ${labels}`);
+});
+
+test('tickLabels escalates past cents for a range straddling zero at sub-cent scale', () => {
+  // Previously: -$0 | -$0 | $0 | $0 | $0 — every tick within half a cent of
+  // zero rounded to an identical, sign-losing "$0" under fmtUsd's fixed
+  // 2-decimal fallback. None of the negative ticks here may render "-$0".
+  const t = niceTicks(-0.005, 0.005);
+  const labels = tickLabels(t);
+  assert.equal(new Set(labels).size, labels.length, `duplicate in ${labels}`);
+  assert.ok(!labels.includes('-$0'), `printed -$0: ${labels}`);
+});
+
+test('tickLabels separates a dust-level range with no unit to abbreviate', () => {
+  const t = niceTicks(0.001, 0.0015);
+  const labels = tickLabels(t);
+  assert.equal(new Set(labels).size, labels.length, `duplicate in ${labels}`);
+});
+
+// ---- unit-selection boundaries ----
+// All seven of the cases above sit far from every k/M/B threshold, so a
+// mutant that shifts a threshold by a decade (e.g. treating $50k as if it
+// were in M territory) would pass the whole suite otherwise.
+
+test('tickLabels stays unabbreviated just below the k threshold', () => {
+  const labels = tickLabels(niceTicks(0, 900));
+  assert.ok(labels.every((l) => !/[kMB]$/.test(l)), `unexpected unit: ${labels}`);
+});
+
+test('tickLabels crosses into k right at the threshold', () => {
+  const labels = tickLabels(niceTicks(0, 1000));
+  assert.ok(labels.slice(1).every((l) => l.endsWith('k')), `expected k: ${labels}`);
+});
+
+test('tickLabels stays in k just below the M threshold', () => {
+  // $500k is the case that would misfire under a threshold shifted one decade
+  // down, rendering as "$0.5M" instead.
+  const labels = tickLabels(niceTicks(0, 5e5));
+  assert.ok(labels.slice(1).every((l) => l.endsWith('k')), `expected k, not M: ${labels}`);
+});
+
+test('tickLabels crosses into M right at the threshold', () => {
+  const labels = tickLabels(niceTicks(0, 1e6));
+  assert.ok(labels.slice(1).every((l) => l.endsWith('M')), `expected M: ${labels}`);
+});
+
+test('tickLabels stays in M just below the B threshold', () => {
+  const labels = tickLabels(niceTicks(0, 5e8));
+  assert.ok(labels.slice(1).every((l) => l.endsWith('M')), `expected M, not B: ${labels}`);
+});
+
+test('tickLabels crosses into B right at the threshold', () => {
+  const labels = tickLabels(niceTicks(0, 1e9));
+  assert.ok(labels.slice(1).every((l) => l.endsWith('B')), `expected B: ${labels}`);
 });
 
 test('tickLabels returns nothing for an empty tick set', () => {
   assert.deepEqual(tickLabels([]), []);
+});
+
+test('tickLabels never collides or mixes precision, generated across the full magnitude range', () => {
+  // A hand-picked suite can pass while a whole decade is broken (the sub-cent
+  // dust bug above only showed up around 1e-4 to 1e-2) — generate ranges
+  // instead of listing them, so a bug confined to one decade or one sign
+  // can't hide between the examples above. Sweeps ~15 decades (1e-4, dust,
+  // through 1e10, nine-figure equity), a few non-round multipliers per decade
+  // so ticks don't always land on tidy numbers, both signs, and zero-
+  // straddling ranges (niceTicks' near-zero step behaves differently there).
+  const decades = [];
+  for (let e = -4; e <= 10; e++) decades.push(10 ** e);
+  const multipliers = [1, 2.3, 7.7];
+  const ranges = [];
+  for (const decade of decades) {
+    for (const m of multipliers) {
+      const span = decade * m;
+      ranges.push([0, span]);
+      ranges.push([-span, 0]);
+      ranges.push([-span / 2, span / 2]);
+    }
+  }
+
+  let checked = 0;
+  for (const [min, max] of ranges) {
+    const ticks = niceTicks(min, max);
+    if (ticks.length < 2) continue; // nothing to compare
+    checked++;
+    const labels = tickLabels(ticks);
+
+    assert.equal(new Set(labels).size, labels.length,
+      `duplicate label for niceTicks(${min}, ${max}): ${labels}`);
+    assert.ok(!labels.includes('-$0'), `printed -$0 for niceTicks(${min}, ${max}): ${labels}`);
+
+    // Every non-zero label carrying a unit suffix must share that suffix and
+    // the same decimal count as its siblings.
+    const suffixed = labels.filter((l) => l !== '$0' && /[kMB]$/.test(l));
+    if (suffixed.length) {
+      const shapes = new Set(suffixed.map((l) => {
+        const m2 = l.match(/^-?\$(\d+)(\.(\d+))?([kMB])$/);
+        return m2 ? `${m2[4]}:${m2[3] ? m2[3].length : 0}` : `unparsed:${l}`;
+      }));
+      assert.equal(shapes.size, 1,
+        `mixed suffix/precision for niceTicks(${min}, ${max}): ${labels}`);
+    }
+  }
+  assert.ok(checked > 100, `expected a broad sweep, only checked ${checked}`);
 });
 
 const BOX = { width: 600, height: 200, padLeft: 52, padRight: 12, padTop: 20, padBottom: 28 };

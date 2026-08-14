@@ -362,6 +362,11 @@ export function createChart(canvas) {
 
   return {
     render(nextPoints, nextOpts = {}) {
+      // A hover redraw scheduled just before new data lands would otherwise
+      // fire after this synchronous draw, wastefully repainting the same
+      // frame a second time (hoverIndex is already reset below, so it isn't
+      // wrong, just redundant work).
+      if (hoverFrame != null) { cancelAnimationFrame(hoverFrame); hoverFrame = null; }
       hoverIndex = -1;
       points = nextPoints || [];
       opts = { ...opts, ...nextOpts };
