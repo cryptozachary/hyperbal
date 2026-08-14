@@ -1,0 +1,97 @@
+{
+  "planPath": "docs/superpowers/plans/2026-08-14-ui-polish-pass.md",
+  "specPath": "docs/superpowers/specs/2026-08-14-ui-polish-pass-design.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Extract format.js with tests",
+      "status": "pending",
+      "description": "**Goal:** Move the six formatters out of app.js into a pure, node-testable module, adding fmtPct, fmtCompact and fmtAxisTime.\n\n**Files:**\n- Create: public/js/format.js, test/format.test.js\n- Modify: public/app.js:1-6, public/app.js:58, public/index.html:115\n\n**Verify:** `npm test`\n\n```json:metadata\n{\"files\": [\"public/js/format.js\", \"test/format.test.js\", \"public/app.js\", \"public/index.html\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"format.js imports cleanly in Node with no DOM globals\", \"fmtCompact renders $49k, $1.2M, $0 and negatives\", \"fmtAxisTime picks time-of-day under 36h and dates above\", \"dashboard renders identically\", \"npm test passes\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Move app.js to public/js/ and extract api.js + chart.js",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Establish the module directory and pull out the two lowest-coupling concerns, with no behavior change.\n\n**Files:**\n- Create: public/js/api.js, public/js/chart.js, public/js/app.js\n- Delete: public/app.js\n- Modify: public/index.html:115\n\n**Verify:** `npm test`; `npm start` and walk the behavior checklist\n\n```json:metadata\n{\"files\": [\"public/js/api.js\", \"public/js/chart.js\", \"public/js/app.js\", \"public/index.html\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"public/app.js deleted, public/js/app.js is the entry point\", \"every route string lives in api.js\", \"chart drawing is out of app.js\", \"behavior identical\", \"npm test passes\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Extract the panel modules",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Split account, fills, exports and wallets out of app.js. Still no behavior change.\n\n**Files:**\n- Create: public/js/account.js, public/js/fills.js, public/js/exports.js, public/js/wallets.js\n- Modify: public/js/app.js\n\n**Verify:** `npm start` full manual pass; `wc -l public/js/app.js` under 180\n\n```json:metadata\n{\"files\": [\"public/js/account.js\", \"public/js/fills.js\", \"public/js/exports.js\", \"public/js/wallets.js\", \"public/js/app.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"app.js under 180 lines, only state/socket/polling/wiring\", \"no panel module reads shared state\", \"app.js never getElementById for a panel-owned element\", \"behavior identical\", \"npm test passes\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Design tokens and numeric typography",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Replace scattered magic values with a token layer and put tabular numerals on every number.\n\n**Files:**\n- Modify: public/styles.css\n\n**Verify:** `grep -n '#[0-9a-fA-F]\\{6\\}' public/styles.css` matches only inside :root\n\n```json:metadata\n{\"files\": [\"public/styles.css\"], \"verifyCommand\": \"grep -n '#[0-9a-fA-F]\\\\{6\\\\}' public/styles.css\", \"acceptanceCriteria\": [\"no raw hex below the :root block\", \"padding from --sp-*, radii from --r-*\", \"tabular-nums on numeric cells and card values\", \"prefers-reduced-motion block disables transitions\", \"layout visually unchanged apart from spacing regularity\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Feedback module - toasts, skeletons, confirm dialog, status pulse",
+      "status": "pending",
+      "blockedBy": [3, 4],
+      "description": "**Goal:** Replace the loading overlay, the sticky error box for non-blocking failures, and window.confirm().\n\n**Files:**\n- Create: public/js/feedback.js\n- Modify: public/index.html, public/styles.css, public/js/app.js, public/js/wallets.js, public/js/exports.js, public/js/fills.js\n\n**Verify:** `npm start` - shimmer on wallet switch, toast on add, dialog on delete, Escape cancels\n\n```json:metadata\n{\"files\": [\"public/js/feedback.js\", \"public/index.html\", \"public/styles.css\", \"public/js/app.js\", \"public/js/wallets.js\", \"public/js/exports.js\", \"public/js/fills.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"loading overlay gone, shimmer placeholders appear\", \"wallet add/remove and completed syncs toast for 5s\", \"a truncated sync keeps its persistent inline line\", \"delete opens a focus-trapped dialog, Escape cancels, copy unchanged\", \"status badge pulses when Live, static under reduced motion\", \"blocking failures still use the inline #error region\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: chart-math.js with tests",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Build and prove the pure geometry the chart needs, before any canvas code depends on it.\n\n**Files:**\n- Create: public/js/chart-math.js, test/chart-math.test.js\n\n**Verify:** `node --test test/chart-math.test.js`\n\n```json:metadata\n{\"files\": [\"public/js/chart-math.js\", \"test/chart-math.test.js\"], \"verifyCommand\": \"node --test test/chart-math.test.js\", \"acceptanceCriteria\": [\"niceTicks gives 3-6 ticks on 1/2/5 boundaries for ordinary, zero-spanning, sub-unit and flat ranges\", \"computeScales centers a flat series instead of dividing by zero\", \"nearestIndex correct on empty, single-point, exact-match and out-of-range input\", \"segments splits on nulls\", \"module references no DOM global\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Chart rendering - axes, gridlines, area fill, null gaps, sparse notice",
+      "status": "pending",
+      "blockedBy": [3, 6],
+      "description": "**Goal:** Replace the bare line with a readable chart.\n\n**Files:**\n- Modify: public/js/chart.js (full rewrite of the draw path), public/styles.css, public/index.html:41\n\n**Verify:** `npm start` - axes and grid render; PnL toggle shows gaps not zeros\n\n```json:metadata\n{\"files\": [\"public/js/chart.js\", \"public/styles.css\", \"public/index.html\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Y axis shows 4-5 compact dollar labels with gridlines\", \"X axis shows 3 labels whose format matches the span\", \"gradient area fill colored by direction\", \"a null renders as a gap, not a point at zero\", \"under 2 points shows the sparse message\", \"canvas 280px desktop / 200px below 760px, height read from CSS\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Chart interaction - crosshair, tooltip, last-value pill",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Make the chart answer 'what was it worth, and when?'\n\n**Files:**\n- Modify: public/js/chart.js\n\n**Verify:** `npm start` - hover across the chart; drag with touch emulation\n\n```json:metadata\n{\"files\": [\"public/js/chart.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"pointer draws a dashed crosshair and a marker on the nearest snapshot\", \"tooltip shows exact value and timestamp\", \"tooltip flips left when it would overflow\", \"pointerleave clears the crosshair\", \"touch drag works via pointer events\", \"last value pinned as a pill at the right edge\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Range pills and change-over-range readout",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Let the chart show 24h / 7d / 30d / All using the ?since= parameter that already exists on /api/history.\n\n**Files:**\n- Modify: public/index.html:33-42, public/styles.css, public/js/app.js\n\n**Verify:** `npm start` - clicking a pill issues exactly one /api/history request and redraws only the chart\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/styles.css\", \"public/js/app.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"four range pills render, All active on load\", \"selecting a range re-fetches with ?since= and redraws only the chart\", \"change readout shows absolute and percent, colored by sign\", \"readout shows an em dash when the range has under two points\", \"selection survives wallet switches within the session\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Summary cards - sparklines, 24h deltas, long/short split",
+      "status": "pending",
+      "blockedBy": [7, 9],
+      "description": "**Goal:** Give the four cards trend and hierarchy. Deltas are fixed at 24h, independent of the chart range.\n\n**Files:**\n- Modify: public/js/account.js, public/js/app.js, public/index.html:24-29, public/styles.css\n\n**Verify:** `npm start` - set the chart to 24h then All; card deltas do not change\n\n```json:metadata\n{\"files\": [\"public/js/account.js\", \"public/js/app.js\", \"public/index.html\", \"public/styles.css\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Equity, Unrealized and Realized each show a 20px sparkline\", \"each shows a 24h delta independent of the chart range pill\", \"under two snapshots in 24h the delta reads an em dash, never 0.00%\", \"Open Positions shows a long/short split\", \"cards do not grow taller at 1440px\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: Tables - chips, sticky headers, hover, mobile scroll, empty states",
+      "status": "pending",
+      "blockedBy": [4, 5],
+      "description": "**Goal:** Make the two tables read as designed rather than default.\n\n**Files:**\n- Modify: public/styles.css, public/js/account.js, public/js/fills.js, public/index.html\n\n**Verify:** `npm start` at 375px - tables scroll inside their panels, page does not\n\n```json:metadata\n{\"files\": [\"public/styles.css\", \"public/js/account.js\", \"public/js/fills.js\", \"public/index.html\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Side and Direction render as filled chips\", \"rows highlight on hover, header row sticks on scroll\", \"below 760px tables scroll horizontally with first column pinned, page does not\", \"Trade History empty state offers Sync full history inline\", \"dex collateral suffix stays visually secondary\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: Wallet switcher popover",
+      "status": "pending",
+      "blockedBy": [4, 5],
+      "description": "**Goal:** Replace the header control strip with a switcher plus a popover holding the list, add field, and per-wallet delete.\n\n**Files:**\n- Modify: public/index.html:10-20, public/styles.css, public/js/wallets.js, public/js/app.js\n\n**Verify:** `npm start` - delete a wallet other than the one loaded; the dashboard keeps showing the current wallet\n\n```json:metadata\n{\"files\": [\"public/index.html\", \"public/styles.css\", \"public/js/wallets.js\", \"public/js/app.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"header holds only brand, switcher, Refresh and status\", \"popover lists every wallet with its own delete\", \"closes on Escape, outside click and selection\", \"trigger carries aria-expanded, arrow keys move between rows\", \"deleting a non-selected wallet leaves the current view intact\", \"below 640px the popover is a full-width bottom sheet\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 13: Documentation and final verification",
+      "status": "pending",
+      "blockedBy": [10, 11, 12],
+      "description": "**Goal:** Bring the README in line with what the app now does, and run the whole manual checklist once.\n\n**Files:**\n- Modify: README.md\n\n**Verify:** `npm test`; full manual checklist in the plan\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Features section describes the interactive chart and the switcher popover\", \"Project structure block reflects public/js/\", \"no chart library claim still present and still true\", \"Test section mentions the frontend unit tests\", \"full manual checklist passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-08-14T00:00:00.000Z"
+}
