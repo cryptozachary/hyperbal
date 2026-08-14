@@ -136,26 +136,32 @@ export const fmtUsd = (n) =>
 export const fmtNum = (n, d = 4) =>
   n == null ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
 
-export const fmtPct = (n, d = 2) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(d)}%`);
+export const fmtPct = (n, d = 2) =>
+  (n == null || !Number.isFinite(n) ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(d)}%`);
 
 export const fmtTime = (ts) => (ts == null ? '—' : new Date(ts).toLocaleString());
 
-// Axis labels need to fit in ~40px, so full currency formatting won't do.
 const trimUnit = (v) => (v < 10 ? v.toFixed(1) : String(Math.round(v))).replace(/\.0$/, '');
 
+// Axis labels need to fit in ~40px, so full currency formatting won't do.
 export const fmtCompact = (n) => {
   if (n == null || !Number.isFinite(n)) return '—';
   const a = Math.abs(n);
   const sign = n < 0 ? '-' : '';
   if (a === 0) return '$0';
-  if (a >= 1e9) return `${sign}$${trimUnit(a / 1e9)}B`;
-  if (a >= 1e6) return `${sign}$${trimUnit(a / 1e6)}M`;
-  if (a >= 1e3) return `${sign}$${trimUnit(a / 1e3)}k`;
+  // Thresholds sit where trimUnit's rounding flips, not at the round power of ten:
+  // testing `a >= 1e6` first would send 999,999 down the `k` branch, where it rounds
+  // to 1000 and renders "$1000k".
+  if (a >= 999.5e6) return `${sign}$${trimUnit(a / 1e9)}B`;
+  if (a >= 999.5e3) return `${sign}$${trimUnit(a / 1e6)}M`;
+  if (a >= 999.5) return `${sign}$${trimUnit(a / 1e3)}k`;
   return `${sign}$${a < 10 ? a.toFixed(2) : String(Math.round(a))}`;
 };
 
 // The x axis means something different at 24h than at two years, so the label follows the span.
+// Guarded like its siblings — a wrong-but-plausible axis label is harder to spot than an em dash.
 export const fmtAxisTime = (ts, spanMs) => {
+  if (ts == null || !Number.isFinite(spanMs)) return '—';
   const d = new Date(ts);
   if (spanMs <= 36 * 3600e3) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   if (spanMs <= 400 * 86400e3) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -166,8 +172,11 @@ export const cls = (n) => (n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '');
 
 export const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '');
 
-export const esc = (s) =>
-  String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Single quotes are escaped too — later tasks generate markup, and one
+// single-quoted attribute would otherwise be an injection hole.
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1275,6 +1284,21 @@ if (r.truncated) {
 
 and replace `out.textContent = 'Sync failed: …'` with `toast('Sync failed: ' + e.message, 'error')`.
 
+**Two pre-existing export-panel defects to fix here**, surfaced during Task 3's
+review and deliberately left alone then because that task was under a
+zero-behavior-change contract:
+
+1. **A sync silently resets the selected period.** Select 2024, click Sync, click
+   Detailed CSV — you get 2026, because `loadPeriods` refills the picker and the
+   browser selects the first option. Capture `$('exportYear').value` before the
+   refill and restore it afterwards if that option still exists.
+2. **A failed `getRange` leaves the download buttons enabled**, so a year-scoped
+   export silently degrades to all-time. The existing comment claims "the
+   download buttons will report the error", but they don't — the download
+   succeeds with the wrong scope. Under the new error policy this is a
+   non-blocking failure: toast it, and disable the two download buttons until a
+   later `loadPeriods` succeeds.
+
 - [ ] **Step 5: Verify**
 
 Run: `npm start`
@@ -1307,7 +1331,17 @@ git commit -m "feat(ui): toasts, skeletons, focus-trapped confirm dialog, status
 - [ ] `computeScales` centers a flat series instead of dividing by zero
 - [ ] `nearestIndex` is correct on empty, single-point, exact-match, and out-of-range input
 - [ ] `segments` splits on nulls so the chart can draw gaps
+- [ ] `pointerToIndex` maps across the plot, forgives an 8px overshoot at each edge, and returns -1 outside it
+- [ ] `tooltipBox` flips left near the right edge and clamps inside the plot on both axes
+- [ ] `pickXLabels` degrades to fewer marks on short series
 - [ ] The module references no DOM global
+
+**Why the interaction geometry lives here rather than in `chart.js`:** no agent in
+this workflow can drive a browser, and `chart.js` reads CSS custom properties at
+module scope so Node cannot import it either. Hit-testing and tooltip placement
+written inline in the canvas code would be unverifiable by anyone until a human
+opened the page. As pure functions they are ordinary unit tests, and `chart.js`
+is left holding only the painting.
 
 **Verify:** `node --test test/chart-math.test.js` → PASS
 
@@ -1320,8 +1354,10 @@ Create `test/chart-math.test.js`:
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { niceStep, niceTicks, computeScales, nearestIndex, segments, rangeChange }
-  from '../public/js/chart-math.js';
+import {
+  niceStep, niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  pickXLabels, pointerToIndex, tooltipBox,
+} from '../public/js/chart-math.js';
 
 test('niceStep snaps to 1/2/5 x 10^n', () => {
   assert.equal(niceStep(0.7), 1);
@@ -1404,6 +1440,67 @@ test('rangeChange needs two finite points', () => {
   assert.equal(c.abs, 50);
   assert.equal(c.pct, 50);
   assert.equal(rangeChange([0, 10]).pct, null); // no percent from a zero base
+});
+
+// ---- Interaction geometry ----
+// These cover what would otherwise be unverifiable: no agent in this workflow can
+// drive a browser, so the crosshair's hit-testing and the tooltip's flip are only
+// checkable if they are pure.
+
+test('pickXLabels degrades gracefully on short series', () => {
+  assert.deepEqual(pickXLabels(0), []);
+  assert.deepEqual(pickXLabels(1), [0]);
+  assert.deepEqual(pickXLabels(2), [0, 1]);
+  assert.deepEqual(pickXLabels(3), [0, 1, 2]);
+  assert.deepEqual(pickXLabels(30), [0, 14, 29]);
+});
+
+const PLOT = { x0: 52, x1: 628, y0: 20, y1: 172 };
+const SERIES = [{ ts: 1000 }, { ts: 2000 }, { ts: 3000 }, { ts: 4000 }];
+const SPAN = 3000;
+
+test('pointerToIndex maps across the plot and rejects outside it', () => {
+  assert.equal(pointerToIndex(52, PLOT, SERIES, SPAN), 0);    // left edge
+  assert.equal(pointerToIndex(628, PLOT, SERIES, SPAN), 3);   // right edge
+  assert.equal(pointerToIndex(340, PLOT, SERIES, SPAN), 1);   // midpoint -> ts 2500, nearer 2000
+  assert.equal(pointerToIndex(0, PLOT, SERIES, SPAN), -1);    // well left
+  assert.equal(pointerToIndex(900, PLOT, SERIES, SPAN), -1);  // well right
+});
+
+test('pointerToIndex forgives a small overshoot at each edge', () => {
+  assert.equal(pointerToIndex(46, PLOT, SERIES, SPAN), 0);    // 6px left of x0, within slack
+  assert.equal(pointerToIndex(634, PLOT, SERIES, SPAN), 3);   // 6px right of x1
+  assert.equal(pointerToIndex(43, PLOT, SERIES, SPAN), -1);   // 9px left, past slack
+});
+
+test('pointerToIndex survives degenerate input', () => {
+  assert.equal(pointerToIndex(300, PLOT, [], SPAN), -1);
+  assert.equal(pointerToIndex(300, PLOT, [{ ts: 5 }], 0), 0);          // single point, zero span
+  assert.equal(pointerToIndex(300, { ...PLOT, x1: 52 }, SERIES, SPAN), 0); // zero-width plot
+});
+
+test('tooltipBox sits right of the crosshair when there is room', () => {
+  const { bx, by, flip } = tooltipBox({ hx: 100, hy: 96, boxW: 132, boxH: 42, plot: PLOT });
+  assert.equal(flip, false);
+  assert.equal(bx, 112);
+  assert.equal(by, 75);
+});
+
+test('tooltipBox flips left rather than overflowing the right edge', () => {
+  const { bx, flip } = tooltipBox({ hx: 600, hy: 96, boxW: 132, boxH: 42, plot: PLOT });
+  assert.equal(flip, true);
+  assert.equal(bx, 456);
+  assert.ok(bx >= PLOT.x0);
+});
+
+test('tooltipBox clamps vertically inside the plot', () => {
+  assert.equal(tooltipBox({ hx: 100, hy: 20, boxW: 132, boxH: 42, plot: PLOT }).by, PLOT.y0);
+  assert.equal(tooltipBox({ hx: 100, hy: 172, boxW: 132, boxH: 42, plot: PLOT }).by, PLOT.y1 - 42);
+});
+
+test('tooltipBox keeps a box wider than the plot on screen', () => {
+  const wide = tooltipBox({ hx: 600, hy: 96, boxW: 900, boxH: 42, plot: PLOT });
+  assert.equal(wide.bx, PLOT.x0); // clamped, not hanging off the left
 });
 ```
 
@@ -1499,6 +1596,50 @@ export function rangeChange(values) {
   const first = finite[0], last = finite[finite.length - 1];
   return { abs: last - first, pct: first === 0 ? null : ((last - first) / Math.abs(first)) * 100 };
 }
+
+// ---- Interaction geometry ----
+//
+// These three would naturally live inside chart.js's draw and pointer code, where
+// nothing could test them: chart.js reads CSS custom properties at module scope, so
+// Node cannot import it, and no agent in this workflow can drive a browser. Keeping
+// them here as pure functions is what makes the crosshair's behavior verifiable
+// rather than merely asserted.
+
+// Which point indices get an x-axis label. Three marks (first, middle, last) unless
+// the series is too short for that to be meaningful.
+export function pickXLabels(n) {
+  if (n <= 0) return [];
+  if (n === 1) return [0];
+  if (n === 2) return [0, n - 1];
+  return [0, Math.floor((n - 1) / 2), n - 1];
+}
+
+// Pointer x -> point index, or -1 when the pointer is outside the plot. `slack` is
+// the forgiveness band beyond each edge, so the crosshair doesn't drop out the
+// instant the cursor grazes the axis.
+export function pointerToIndex(px, plot, points, span, slack = 8) {
+  if (!points.length) return -1;
+  const { x0, x1 } = plot;
+  // Degenerate check MUST precede the bounds check: with x0 === x1 the slack window
+  // collapses to 16px, so any realistic pointer position would be rejected as
+  // outside before the collapsed-axis branch could resolve it to index 0.
+  if (x1 === x0 || span === 0) return 0;
+  if (px < x0 - slack || px > x1 + slack) return -1;
+  const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
+  return nearestIndex(points, points[0].ts + frac * span);
+}
+
+// Where the tooltip box goes: to the right of the crosshair normally, flipped to the
+// left when it would overflow, and always clamped inside the plot vertically.
+export function tooltipBox({ hx, hy, boxW, boxH, plot, gap = 12 }) {
+  const { x0, x1, y0, y1 } = plot;
+  const flip = hx + gap + boxW > x1;
+  let bx = flip ? hx - gap - boxW : hx + gap;
+  // A box wider than the plot itself would otherwise hang off the left edge.
+  bx = Math.max(x0, Math.min(bx, x1 - boxW));
+  const by = Math.min(Math.max(hy - boxH / 2, y0), y1 - boxH);
+  return { bx, by, flip };
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1553,10 +1694,16 @@ canvas{width:100%;display:block;height:280px}
 
 ```js
 import { fmtCompact, fmtUsd, fmtAxisTime } from './format.js';
-import { niceTicks, computeScales, nearestIndex, segments, rangeChange } from './chart-math.js';
+import {
+  niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  pickXLabels, pointerToIndex, tooltipBox,
+} from './chart-math.js';
 
 // Re-exported so consumers have one import for chart concerns.
-export { niceTicks, computeScales, nearestIndex, segments, rangeChange };
+export {
+  niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  pickXLabels, pointerToIndex, tooltipBox,
+};
 
 const CSS = getComputedStyle(document.documentElement);
 const token = (name, fallback) => (CSS.getPropertyValue(name) || '').trim() || fallback;
@@ -1625,7 +1772,7 @@ export function createChart(canvas) {
     // --- x labels: first, middle, last ---
     const span = points[n - 1].ts - points[0].ts;
     ctx.fillStyle = COLORS.muted;
-    const marks = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+    const marks = pickXLabels(n);
     marks.forEach((i, k) => {
       ctx.textAlign = k === 0 ? 'left' : k === marks.length - 1 ? 'right' : 'center';
       ctx.fillText(fmtAxisTime(points[i].ts, span), s.x(i, n), y1 + 18);
@@ -1799,9 +1946,8 @@ In `public/js/chart.js`, add `let hoverIndex = -1;` beside `let points = []`, an
       const what = fmtUsd(values[hoverIndex]);
       const boxW = Math.max(ctx.measureText(when).width, ctx.measureText(what).width) + 24;
       const boxH = 42;
-      // Flip to the left of the crosshair when the tooltip would overflow.
-      const bx = hx + 12 + boxW > x1 ? hx - 12 - boxW : hx + 12;
-      const by = Math.min(Math.max(hy - boxH / 2, y0), y1 - boxH);
+      // Placement is pure geometry, and lives in chart-math.js so it can be tested.
+      const { bx, by } = tooltipBox({ hx, hy, boxW, boxH, plot: s.plot });
       ctx.fillStyle = token('--surface-3', '#10151f');
       ctx.strokeStyle = token('--line', '#222b3d');
       ctx.lineWidth = 1;
@@ -1843,11 +1989,12 @@ Inside `createChart`, after `const onResize = …`:
     const px = e.clientX - rect.left;
     const st = canvas._scales;
     if (!st || st.n < 2) return;
-    const { x0, x1 } = st.s.plot;
-    if (px < x0 - 8 || px > x1 + 8) { if (hoverIndex !== -1) { hoverIndex = -1; draw(); } return; }
-    const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
-    const ts = points[0].ts + frac * st.span;
-    const idx = nearestIndex(points, ts);
+    // Hit-testing is pure geometry, and lives in chart-math.js so it can be tested;
+    // -1 means the pointer left the plot, which clears the crosshair.
+    // Fourth argument is `slack`, NOT span. Passing a millisecond duration here
+    // makes the bounds check unsatisfiable, so the crosshair never clears when the
+    // pointer leaves horizontally. Omit it and take the 8px default.
+    const idx = pointerToIndex(px, st.s.plot, points);
     if (idx !== hoverIndex) { hoverIndex = idx; draw(); }
   }
   function onPointerLeave() { if (hoverIndex !== -1) { hoverIndex = -1; draw(); } }
@@ -1929,8 +2076,11 @@ Append to `public/styles.css`:
 .chart-change.pos{color:var(--pos)} .chart-change.neg{color:var(--neg)}
 .pill{display:inline-flex;gap:2px;background:var(--surface-3);border:1px solid var(--line);
   border-radius:var(--r-md);padding:2px}
-.pill button{background:none;border:0;color:var(--muted);font-size:11px;
-  padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:11px}
+/* `font:inherit` is a shorthand that resets font-size, so it must come BEFORE the
+   size or the size is dead. Token, not a raw px — this file uses --fs-* throughout. */
+.pill button{background:none;border:0;color:var(--muted);font:inherit;
+  font-size:var(--fs-sm);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);cursor:pointer}
+.pill button:hover{color:var(--text)}
 .pill button.on{background:var(--surface-2);color:var(--accent)}
 ```
 
@@ -2160,6 +2310,12 @@ git commit -m "feat(ui): card sparklines, 24h deltas and long/short split"
 - [ ] Below 760px each table scrolls horizontally inside its panel with the first column pinned; the page body does not scroll sideways
 - [ ] Trade History's empty state offers **Sync full history** inline
 - [ ] The dex collateral suffix stays visually secondary to the coin
+- [ ] **Carried from Task 5's review:** `fillsNext` and `setFilter` mutate
+      `view.offset` / `view.closesOnly` *before* a fetch that can fail, so a failed
+      click leaves the rows and the range label on the old page while the offset has
+      already advanced — two failed clicks then jump two pages on the next success,
+      and the filter highlight moves while the rows don't. Commit those fields only
+      after a successful fetch.
 
 **Verify:** `npm start`, then narrow the window to 375px → tables scroll inside their panels, page does not
 
@@ -2171,6 +2327,9 @@ Append to `public/styles.css`:
 
 ```css
 #tableWrap,#fillsWrap{overflow-x:auto;max-height:420px;overflow-y:auto}
+/* `top:0` is relative to the scroll container, not the viewport, so this does not
+   fight the sticky .topbar — but it must set an OPAQUE background: .panel behind it
+   is a vertical gradient, so a transparent header would show rows sliding under it. */
 thead th{position:sticky;top:0;background:var(--surface-1);z-index:2}
 tbody tr{transition:background var(--dur-fast) var(--ease)}
 tbody tr:hover td{background:var(--surface-2)}
@@ -2606,6 +2765,11 @@ Run: `npm start` and confirm each:
 - [ ] Trade History paging, closes-only filter, and the page clamp (page to the end, then sync)
 - [ ] Adding a wallet, switching wallets, deleting a non-selected wallet, deleting the last wallet
 - [ ] Both CSV downloads fire; the period picker lists years
+- [ ] Click **Sync full history** twice, then open the period picker — the year
+      options must not duplicate (regression guard: `loadPeriods` clears the
+      picker itself, because `sync()` calls it without a preceding `setAddress`)
+- [ ] Switch wallets rapidly A→B→A, then open the period picker — it lists only
+      the current wallet's years, not both wallets' merged
 - [ ] A truncated sync leaves its message on screen; a complete sync toasts
 - [ ] Agent badge and Connected Agent Wallets panel render
 - [ ] Layout holds at 1440 / 768 / 375px with no horizontal page scroll

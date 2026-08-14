@@ -10,35 +10,80 @@
   <header class="topbar">
     <div class="brand">⚡ Hyperliquid PnL</div>
     <div class="controls">
-      <select id="walletSelect" aria-label="Saved wallets"></select>
-      <input id="walletInput" type="text" placeholder="0x… wallet address" autocomplete="off" spellcheck="false" />
-      <button id="addBtn">Add</button>
-      <button id="removeBtn" title="Delete the selected wallet and its stored history">✕ Delete</button>
+      <button id="walletSwitcher" class="switcher" aria-expanded="false" aria-haspopup="dialog">
+        <span class="avatar" id="walletAvatar"></span>
+        <span class="switcher-text">
+          <span class="switcher-name" id="walletName">No wallet</span>
+          <span class="switcher-sub" id="walletCount"></span>
+        </span>
+        <span class="switcher-caret">▾</span>
+      </button>
       <button id="refreshBtn">↻ Refresh</button>
       <span id="status" class="badge">—</span>
+    </div>
+    <div id="walletPop" class="pop hidden" role="dialog" aria-label="Watched wallets">
+      <div class="lbl">Watched wallets</div>
+      <div id="walletList"></div>
+      <div class="pop-divider"></div>
+      <div class="lbl">Add a wallet</div>
+      <div class="pop-add">
+        <input id="walletInput" type="text" placeholder="0x… public address" autocomplete="off" spellcheck="false" />
+        <button id="addBtn">Add</button>
+      </div>
     </div>
   </header>
 
   <main>
     <div id="walletBadge" class="wallet-badge hidden"></div>
     <section class="cards" id="cards">
-      <div class="card"><div class="card-label">Account Equity</div><div class="card-value" id="equity">—</div></div>
-      <div class="card"><div class="card-label">Unrealized PnL</div><div class="card-value" id="uPnl">—</div></div>
-      <div class="card"><div class="card-label">Realized PnL (cumulative)</div><div class="card-value" id="rPnl">—</div><div class="card-sub" id="rPnlRecent"></div></div>
-      <div class="card"><div class="card-label">Open Positions</div><div class="card-value" id="posCount">—</div></div>
+      <div class="card">
+        <div class="card-label">Account Equity</div>
+        <div class="card-value" id="equity">—</div>
+        <div class="card-sub" id="equityDelta"></div>
+        <canvas class="spark" id="equitySpark"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-label">Unrealized PnL</div>
+        <div class="card-value" id="uPnl">—</div>
+        <div class="card-sub" id="uPnlDelta"></div>
+        <canvas class="spark" id="uPnlSpark"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-label">Realized PnL (cumulative)</div>
+        <div class="card-value" id="rPnl">—</div>
+        <div class="card-sub" id="rPnlDelta"></div>
+        <div class="card-note" id="rPnlRecent"></div>
+        <canvas class="spark" id="rPnlSpark"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-label">Open Positions</div>
+        <div class="card-value" id="posCount">—</div>
+        <div class="card-sub" id="posSplit"></div>
+      </div>
     </section>
 
     <p class="dex-note">Totals are aggregated across all Hyperliquid perp dexs.</p>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Equity / PnL History</h2>
-        <div class="toggle" id="chartToggle">
-          <button class="active" data-series="equity">Equity</button>
-          <button data-series="pnl">PnL</button>
+        <div>
+          <h2>Equity / PnL History</h2>
+          <div id="chartChange" class="chart-change">—</div>
+        </div>
+        <div class="panel-head-controls">
+          <div class="toggle" id="chartToggle">
+            <button class="active" data-series="equity">Equity</button>
+            <button data-series="pnl">PnL</button>
+          </div>
+          <div class="pill" id="chartRange">
+            <button data-range="86400000">24h</button>
+            <button data-range="604800000">7d</button>
+            <button data-range="2592000000">30d</button>
+            <button class="on" data-range="all">All</button>
+          </div>
         </div>
       </div>
-      <canvas id="chart" height="220"></canvas>
+      <canvas id="chart"></canvas>
     </section>
 
     <section class="panel">
@@ -51,7 +96,7 @@
           </tr></thead>
           <tbody></tbody>
         </table>
-        <div id="emptyState" class="empty hidden">No open positions.</div>
+        <div id="emptyState" class="empty hidden"><span class="empty-icon">◎</span>No open positions.</div>
       </div>
     </section>
 
@@ -71,7 +116,11 @@
           </tr></thead>
           <tbody></tbody>
         </table>
-        <div id="fillsEmpty" class="empty hidden">No trades recorded yet.</div>
+        <div id="fillsEmpty" class="empty hidden">
+          <span class="empty-icon">◎</span>
+          <span>No trades recorded yet.</span>
+          <button id="fillsSyncBtn" class="btn" disabled>↻ Sync full history</button>
+        </div>
       </div>
       <div class="pager">
         <button id="fillsPrev">‹ Newer</button>
@@ -107,11 +156,16 @@
       <div id="agentsPanel" class="agents"></div>
     </section>
 
-    <div id="loading" class="overlay hidden">Loading…</div>
     <div id="error" class="error hidden"></div>
   </main>
 
   <footer class="foot">Read-only. Never enter private keys or seed phrases.</footer>
-  <script src="app.js"></script>
+  <!-- Page-level overlays, direct children of <body> (not <main>): confirmDialog()
+       makes every OTHER body child inert while open, so these two must stay outside
+       that sweep — a toast raised while the dialog is open is the only way an error
+       reaches the user. -->
+  <div id="toasts" class="toasts"></div>
+  <div id="modalRoot" class="hidden"></div>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

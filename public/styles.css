@@ -1,74 +1,264 @@
 :root{
-  --bg:#0b0e14; --bg2:#121722; --card:#161c2b; --line:#222b3d;
-  --text:#e6ebf5; --muted:#8a97b1; --pos:#1fd09a; --neg:#ff5d6c; --accent:#6c8cff;
+  /* surfaces */
+  --bg:#0b0e14; --bg2:#121722; --bg-glow:#1a2336;
+  --surface-1:#161c2b; --surface-2:#1a2131; --surface-3:#10151f;
+  --card-grad-end:#121624;
+  --btn-raised-1:#2a3550; --btn-raised-2:#1c2438;
+  --line:#222b3d; --line-soft:#1a2130;
+  /* Alpha blends of --bg. The hex-literal check can't see rgba(), so these are
+     declared here to stop each new overlay inventing its own. */
+  --scrim-70:rgba(11,14,20,.7); --scrim-62:rgba(4,6,10,.62);
+
+  /* text */
+  --text:#e6ebf5; --muted:#8a97b1;
+
+  /* semantics */
+  --pos:#1fd09a; --neg:#ff5d6c; --accent:#6c8cff; --warn:#ffce6a;
+  --pos-a12:rgba(31,208,154,.12); --neg-a12:rgba(255,93,108,.12);
+  --pos-a40:rgba(31,208,154,.4); --neg-a40:rgba(255,93,108,.4);
+  --accent-a08:rgba(108,140,255,.08); --accent-a40:rgba(108,140,255,.4);
+  --warn-a40:rgba(255,206,106,.4);
+
+  /* space */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+
+  /* radius */
+  --r-sm:8px; --r-md:10px; --r-lg:14px; --r-pill:999px;
+
+  /* type */
+  --fs-xs:10px; --fs-sm:12px; --fs-base:13px; --fs-lg:15px; --fs-xl:21px;
+
+  /* elevation + motion */
+  --shadow-card:0 8px 30px rgba(0,0,0,.25);
+  --shadow-pop:0 16px 40px rgba(0,0,0,.5);
+  --dur-fast:120ms; --dur:180ms; --ease:cubic-bezier(.2,.6,.2,1);
 }
+
+/* Digits must not change width as live values tick, or the whole table jitters. */
+.card-value,.card-sub,td,th{font-variant-numeric:tabular-nums}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+    animation-delay:0s !important; transition-delay:0s !important;
+  }
+}
+
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:
-  radial-gradient(1200px 600px at 20% -10%,#1a2336 0%,transparent 60%),var(--bg);color:var(--text)}
-.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;
-  padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(11,14,20,.7);
-  position:sticky;top:0;backdrop-filter:blur(8px);flex-wrap:wrap}
+  radial-gradient(1200px 600px at 20% -10%,var(--bg-glow) 0%,transparent 60%),var(--bg);color:var(--text)}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);
+  padding:var(--sp-3) var(--sp-5);border-bottom:1px solid var(--line);background:transparent;
+  position:sticky;top:0;z-index:60;flex-wrap:wrap}
+.topbar::before{content:"";position:absolute;inset:0;background:var(--scrim-70);
+  backdrop-filter:blur(8px);z-index:-1;pointer-events:none}
 .brand{font-weight:700;letter-spacing:.3px}
-.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.controls{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
 select,input,button{background:var(--bg2);color:var(--text);border:1px solid var(--line);
-  border-radius:10px;padding:8px 10px;font-size:13px}
-input{min-width:280px}
-button{cursor:pointer;transition:.15s}
+  border-radius:var(--r-md);padding:var(--sp-2) var(--sp-3);font-size:var(--fs-base)}
+button{cursor:pointer;transition:border-color var(--dur-fast) var(--ease)}
 button:hover{border-color:var(--accent)}
-#refreshBtn{background:linear-gradient(180deg,#2a3550,#1c2438)}
-.badge{padding:6px 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
-.badge.live{color:var(--pos);border-color:rgba(31,208,154,.4)}
-.badge.poll{color:#ffce6a;border-color:rgba(255,206,106,.4)}
-.badge.down{color:var(--neg);border-color:rgba(255,93,108,.4)}
-main{max-width:1100px;margin:0 auto;padding:20px;position:relative}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
-.card{background:linear-gradient(180deg,var(--card),#121624);border:1px solid var(--line);
-  border-radius:16px;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
-.card-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
-.card-value{font-size:26px;font-weight:700;margin-top:6px}
-.card-sub{font-size:12px;color:var(--muted);margin-top:4px}
-.panel{background:linear-gradient(180deg,var(--card),#121624);border:1px solid var(--line);
-  border-radius:16px;padding:16px 18px;margin-bottom:18px}
-.panel-head{display:flex;justify-content:space-between;align-items:center}
-h2{font-size:15px;margin:0 0 10px}
-.toggle button{padding:5px 10px;border-radius:8px;font-size:12px}
+#refreshBtn{background:linear-gradient(180deg,var(--btn-raised-1),var(--btn-raised-2))}
+.badge{padding:var(--sp-1) var(--sp-3);border-radius:var(--r-pill);border:1px solid var(--line);font-size:var(--fs-sm);color:var(--muted)}
+.badge.live{color:var(--pos);border-color:var(--pos-a40)}
+.badge.poll{color:var(--warn);border-color:var(--warn-a40)}
+main{max-width:1100px;margin:0 auto;padding:var(--sp-5);position:relative}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-3);margin-bottom:18px}
+.card{background:linear-gradient(180deg,var(--surface-1),var(--card-grad-end));border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:var(--sp-4);box-shadow:var(--shadow-card);
+  display:flex;flex-direction:column}
+.card-label{color:var(--muted);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.6px}
+.card-value{font-size:var(--fs-xl);font-weight:700;letter-spacing:-.3px;margin-top:6px}
+.card-sub{font-size:var(--fs-sm);color:var(--muted);margin-top:4px}
+.card-sub.pos{color:var(--pos)} .card-sub.neg{color:var(--neg)}
+/* Deliberately smaller/quieter than .card-sub: the Realized card carries both a
+   24h delta (the trend, primary) and this provenance note (how much of the
+   cumulative total is attributable to Hyperliquid's recent-fills window) — the
+   type scale is what tells them apart at a glance. */
+.card-note{font-size:var(--fs-xs);color:var(--muted);margin-top:2px}
+/* 20px, not #chart's 280px — Task 10's summary-card trend lines, deliberately
+   their own class so they don't inherit the panel chart's sizing. margin-top:auto
+   (the card is now a column flexbox) pins every spark to the card's bottom edge,
+   so the three trend lines share one baseline even though the Realized card has
+   an extra card-note line pushing everything above it down. */
+.spark{display:block;width:100%;height:20px;margin-top:auto}
+.panel{background:linear-gradient(180deg,var(--surface-1),var(--card-grad-end));border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:var(--sp-4);margin-bottom:18px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+h2{font-size:var(--fs-lg);margin:0 0 10px}
+.toggle button{padding:var(--sp-1) var(--sp-3);border-radius:var(--r-sm);font-size:var(--fs-sm)}
 .toggle button.active{border-color:var(--accent);color:var(--accent)}
-canvas{width:100%;display:block}
+/* Scoped to #chart, not the bare element selector: Task 10 adds small sparkline
+   canvases elsewhere on the page that must not inherit a 280px chart height. */
+#chart{width:100%;display:block;height:280px}
+@media(max-width:760px){#chart{height:200px}}
 table{width:100%;border-collapse:collapse}
-th,td{padding:10px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th,td{padding:var(--sp-3) var(--sp-2);text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
-th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
+th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.6px}
 .pos{color:var(--pos)} .neg{color:var(--neg)}
-.side-long{color:var(--pos);font-weight:600} .side-short{color:var(--neg);font-weight:600}
-.empty,.error{padding:20px;text-align:center;color:var(--muted)}
-.error{color:var(--neg);border:1px solid rgba(255,93,108,.3);border-radius:12px;margin-top:14px}
-.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:rgba(11,14,20,.5);border-radius:16px;font-size:16px;color:var(--muted)}
+.empty,.error{padding:var(--sp-5);text-align:center;color:var(--muted)}
+.error{color:var(--neg);border:1px solid var(--neg-a40);border-radius:var(--r-md);margin-top:14px}
 .hidden{display:none}
-.foot{text-align:center;color:var(--muted);padding:18px;font-size:12px;border-top:1px solid var(--line)}
-@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}input{min-width:160px}}
-.wallet-badge{margin:0 0 14px;padding:8px 12px;border-radius:10px;border:1px solid rgba(108,140,255,.4);
-  background:rgba(108,140,255,.08);color:var(--accent);font-size:12px}
+.foot{text-align:center;color:var(--muted);padding:var(--sp-4);font-size:var(--fs-sm);border-top:1px solid var(--line)}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}}
+.wallet-badge{margin:0 0 14px;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);border:1px solid var(--accent-a40);
+  background:var(--accent-a08);color:var(--accent);font-size:var(--fs-sm)}
 .wallet-badge code{color:var(--text)}
-.agents{display:flex;flex-direction:column;gap:8px}
-.agent-row{display:flex;justify-content:space-between;gap:12px;align-items:center;
-  padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+.agents{display:flex;flex-direction:column;gap:var(--sp-2)}
+.agent-row{display:flex;justify-content:space-between;gap:var(--sp-3);align-items:center;
+  padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);border-radius:var(--r-md);font-size:var(--fs-base)}
 .agent-row .agent-name{font-weight:600}
-.agent-row .agent-meta{color:var(--muted);font-size:12px}
+.agent-row .agent-meta{color:var(--muted);font-size:var(--fs-sm)}
 .agent-row.expired{opacity:.55}
 .agent-badge-expired{color:var(--neg);margin-left:6px}
-.agents-empty{color:var(--muted);font-size:13px}
-.dex-note{color:var(--muted);font-size:12px;margin:0 0 14px}
-.pager{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:12px}
-.pager button{padding:5px 12px;border-radius:8px;font-size:12px}
+.agents-empty{color:var(--muted);font-size:var(--fs-base)}
+.dex-note{color:var(--muted);font-size:var(--fs-sm);margin:0 0 14px}
+.pager{display:flex;justify-content:center;align-items:center;gap:var(--sp-3);margin-top:12px}
+.pager button{padding:var(--sp-1) var(--sp-3);border-radius:var(--r-sm);font-size:var(--fs-sm)}
 .pager button:disabled{opacity:.4;cursor:default;border-color:var(--line)}
-.pager-range{color:var(--muted);font-size:12px;min-width:120px;text-align:center}
+.pager-range{color:var(--muted);font-size:var(--fs-sm);min-width:120px;text-align:center}
 /* Direction reads as a label, not a number — left-align it like Time and Coin. */
 #fills th:nth-child(3),#fills td:nth-child(3){text-align:left}
 .export-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}
-.export-row label{color:var(--muted);font-size:12px}
-.export-note{color:var(--muted);font-size:12px;margin:10px 0 0;line-height:1.6}
+.export-row label{color:var(--muted);font-size:var(--fs-sm)}
+.export-note{color:var(--muted);font-size:var(--fs-sm);margin:10px 0 0;line-height:1.6}
 .export-note strong{color:var(--text)}
 /* Custom button colors override the UA's disabled greying — restate it here so a
    disabled export control actually looks disabled. Matches the pager. */
-.export-row select:disabled,.export-row button:disabled,#syncBtn:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+.export-row select:disabled,.export-row button:disabled,#syncBtn:disabled,#fillsSyncBtn:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+
+/* ---- toasts ---- */
+/* z-index:80 — above .modal-backdrop's 70, so a toast raised while the confirm
+   dialog is open still renders above its scrim instead of vanishing behind it. */
+.toasts{position:fixed;right:var(--sp-4);bottom:var(--sp-4);display:flex;flex-direction:column;
+  gap:var(--sp-2);z-index:80;max-width:min(360px,calc(100vw - var(--sp-6)))}
+.toast{background:var(--surface-2);border:1px solid var(--line);border-left-width:3px;
+  border-radius:var(--r-md);padding:var(--sp-3);font-size:var(--fs-sm);color:var(--text);
+  box-shadow:var(--shadow-pop);cursor:pointer;animation:toast-in var(--dur) var(--ease)}
+.toast-success{border-left-color:var(--pos)}
+.toast-error{border-left-color:var(--neg)}
+.toast-info{border-left-color:var(--accent)}
+.toast.leaving{opacity:0;transition:opacity var(--dur) var(--ease)}
+@keyframes toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ---- skeletons ---- */
+.shimmer{display:block;height:12px;border-radius:var(--r-sm);
+  background:linear-gradient(90deg,var(--surface-2) 25%,var(--line) 37%,var(--surface-2) 63%);
+  background-size:400% 100%;animation:shimmer 1.4s linear infinite}
+@keyframes shimmer{from{background-position:100% 0}to{background-position:0 0}}
+/* Matches a real row's rendered height (21px line box + 2×12px --sp-3 padding +
+   1px border = 46px) so a skeleton row doesn't shift the table when it's swapped
+   for real content. */
+.skeleton-row{height:46px}
+.is-loading .card-value,.is-loading .card-sub,.is-loading .card-note,.is-loading .chart-change{color:transparent;position:relative}
+.is-loading .card-value::after{content:"";position:absolute;inset:2px 30% 2px 0;border-radius:var(--r-sm);
+  background:var(--surface-2);animation:shimmer 1.4s linear infinite;
+  background-image:linear-gradient(90deg,var(--surface-2) 25%,var(--line) 37%,var(--surface-2) 63%);
+  background-size:400% 100%}
+/* Split from a bare `canvas` selector on purpose: a 280px chart reads fine dimmed
+   to 35%, but a 20px sparkline is still perfectly legible at that opacity, which
+   let a stale trend line survive the loading state. #chart and .spark are named
+   explicitly (not `canvas`) so a canvas Task 12 adds doesn't silently inherit
+   either treatment without a deliberate choice. */
+.is-loading #chart{opacity:.35}
+.is-loading .spark{visibility:hidden}
+
+/* ---- modal ---- */
+.modal-backdrop{position:fixed;inset:0;background:var(--scrim-62);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;z-index:70;padding:var(--sp-4)}
+.modal{background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:var(--sp-5);max-width:440px;box-shadow:var(--shadow-pop)}
+.modal h3{margin:0 0 var(--sp-2);font-size:var(--fs-lg)}
+.modal-body{margin:0 0 var(--sp-4);color:var(--muted);font-size:var(--fs-base);line-height:1.6}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2)}
+.btn{background:var(--bg2);color:var(--text);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:var(--sp-2) var(--sp-3);font-size:var(--fs-sm);cursor:pointer}
+.btn-danger{color:var(--neg);border-color:var(--neg-a40)}
+/* Restate border-color here: .btn-danger alone loses to the generic
+   button:hover{border-color:var(--accent)} rule on specificity, so hovering
+   Delete would otherwise flip its border blue. */
+.btn-danger:hover{background:var(--neg-a12);border-color:var(--neg-a40)}
+
+/* ---- status dot ---- */
+.status-dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;
+  margin-right:var(--sp-1)}
+.badge.live .status-dot{animation:pulse 2s var(--ease) infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 var(--pos-a40)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- chart range pills + change readout ---- */
+.panel-head-controls{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
+.chart-change{font-size:var(--fs-sm);color:var(--muted);margin:2px 0 var(--sp-2)}
+.chart-change.pos{color:var(--pos)} .chart-change.neg{color:var(--neg)}
+.pill{display:inline-flex;gap:2px;background:var(--surface-3);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:2px}
+.pill button{background:none;border:0;color:var(--muted);
+  padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:var(--fs-sm)}
+.pill button:hover{color:var(--text)}
+.pill button.on{background:var(--surface-2);color:var(--accent)}
+
+/* ---- Task 11: table chips, sticky headers, hover, mobile scroll ---- */
+#tableWrap,#fillsWrap{overflow-x:auto;overflow-y:auto;max-height:420px}
+/* `top:0` is relative to the scroll container (#tableWrap/#fillsWrap), not the
+   viewport, so this does not fight the sticky .topbar — but it needs an OPAQUE
+   background: .panel behind it is a vertical gradient, so a transparent header
+   would show rows sliding underneath it as the body scrolls. */
+thead th{position:sticky;top:0;background:var(--surface-1);z-index:2}
+tbody tr{transition:background var(--dur-fast) var(--ease)}
+tbody tr:hover td{background:var(--surface-2)}
+td{border-bottom:1px solid var(--line-soft)}
+.coin{font-weight:600}
+.coin-dex{color:var(--muted);font-weight:400;font-size:var(--fs-xs)}
+.chip{display:inline-block;font-size:var(--fs-xs);font-weight:700;padding:2px 7px;
+  border-radius:var(--r-pill);letter-spacing:.3px}
+.chip-long,.chip-buy{color:var(--pos);background:var(--pos-a12)}
+.chip-short,.chip-sell{color:var(--neg);background:var(--neg-a12)}
+.chip-flat{color:var(--muted);background:var(--surface-2)}
+div.empty{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2)}
+.empty-icon{font-size:20px;opacity:.6}
+@media(max-width:760px){
+  /* Pinned first column: opaque background so rows don't show through as they
+     scroll under it. The header's first cell is sticky on BOTH axes at once
+     (top from the rule above, left from this one) so it needs the highest
+     z-index to stay above the plain sticky header cells (2) and the pinned
+     body cells (1) at their intersection. */
+  th:first-child,td:first-child{position:sticky;left:0;background:var(--surface-1);z-index:1}
+  thead th:first-child{z-index:3}
+  tbody tr:hover td:first-child{background:var(--surface-2)}
+}
+
+/* Wallet switcher + popover (Task 12). .topbar is already `position:sticky` (a valid
+   positioned containing block for .pop) so no extra rule is needed here — see the
+   sticky/blur/stacking-context notes on .topbar itself further up this file. */
+.switcher{display:inline-flex;align-items:center;gap:var(--sp-2);background:var(--bg2);
+  border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-1) var(--sp-3);cursor:pointer;
+  text-align:left;min-width:0}
+.avatar{width:22px;height:22px;border-radius:6px;background:var(--surface-2);flex:none}
+.switcher-text{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.switcher-name{font-size:var(--fs-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.switcher-sub{font-size:var(--fs-xs);color:var(--muted)}
+.switcher-caret{color:var(--muted);font-size:var(--fs-xs)}
+.pop{position:absolute;top:calc(100% + var(--sp-2));right:var(--sp-5);width:340px;z-index:50;
+  background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:var(--sp-3);box-shadow:var(--shadow-pop)}
+.pop .lbl{color:var(--muted);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.6px;margin-bottom:var(--sp-2)}
+.pop-divider{height:1px;background:var(--line);margin:var(--sp-3) 0}
+.pop-item{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-2);
+  padding:var(--sp-2);border-radius:var(--r-sm);font-size:var(--fs-sm);cursor:pointer;width:100%;
+  background:none;border:0;color:var(--text);text-align:left;min-width:0}
+.pop-item:hover,.pop-item.sel{background:var(--surface-2)}
+.pop-item-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pop-item .via{color:var(--muted);font-size:var(--fs-xs)}
+.pop-del{background:none;border:0;color:var(--muted);cursor:pointer;padding:var(--sp-1);border-radius:var(--r-sm)}
+.pop-del:hover{color:var(--neg);background:var(--neg-a12)}
+.pop-row{display:flex;align-items:center;gap:var(--sp-1);min-width:0}
+.pop-add{display:flex;gap:var(--sp-2)}
+.pop-add input{flex:1;min-width:0}
+@media(max-width:640px){
+  .pop{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;
+    max-height:80vh;overflow-y:auto;overscroll-behavior:contain;
+    border-radius:var(--r-lg) var(--r-lg) 0 0}
+}
