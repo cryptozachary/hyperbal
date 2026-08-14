@@ -4,6 +4,8 @@
 // inline #error region; a failure that does not gets a toast. A toast that fades
 // is the wrong medium when the page behind it is blank.
 
+import { esc } from './format.js';
+
 const $ = (id) => document.getElementById(id);
 
 // api.js marks a request that never reached the server with `err.offline` — the
@@ -47,18 +49,31 @@ export function skeletonRows(tbody, cols, n = 6) {
   }
 }
 
+// Only one dialog at a time. A second call while one is open used to overwrite
+// the first one's DOM out from under it and leave its promise unresolved forever
+// (Task 12's per-row delete button makes this a routine case, not a contrived one)
+// — so a second call closes the first cleanly before opening.
+let openDialog = null;
+
 export function confirmDialog({ title, body, confirmLabel = 'Delete' }) {
+  if (openDialog) openDialog(false);
   return new Promise((resolve) => {
     const root = $('modalRoot');
     const previouslyFocused = document.activeElement;
+    // #modalRoot is a direct child of <body> (see index.html) specifically so it can
+    // be excluded here — everything else on the page is made inert while the dialog
+    // is open, so a stray click or programmatic focus can't reach it even outside
+    // the Tab-key trap below.
+    const inertSiblings = Array.from(document.body.children).filter((el) => el !== root);
+    for (const el of inertSiblings) el.inert = true;
     root.innerHTML = `
       <div class="modal-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-          <h3 id="modalTitle">${title}</h3>
-          <p class="modal-body">${body}</p>
+          <h3 id="modalTitle">${esc(title)}</h3>
+          <p class="modal-body">${esc(body)}</p>
           <div class="modal-actions">
             <button class="btn" data-act="cancel">Cancel</button>
-            <button class="btn btn-danger" data-act="confirm">${confirmLabel}</button>
+            <button class="btn btn-danger" data-act="confirm">${esc(confirmLabel)}</button>
           </div>
         </div>
       </div>`;
@@ -66,18 +81,28 @@ export function confirmDialog({ title, body, confirmLabel = 'Delete' }) {
 
     const focusables = root.querySelectorAll('button');
     const first = focusables[0], last = focusables[focusables.length - 1];
-    last.focus();
+    // Focus Cancel, not Delete: buttons activate on keydown, so holding Enter to
+    // dismiss a *different* dialog (or simple key-repeat) would otherwise land on
+    // and repeatedly click the destructive action of a dialog whose own copy says
+    // this cannot be undone.
+    first.focus();
 
     let settled = false;
     const close = (result) => {
       if (settled) return; // one of Escape/backdrop/Cancel/Confirm always fires exactly once
       settled = true;
+      openDialog = null;
       document.removeEventListener('keydown', onKey);
+      for (const el of inertSiblings) el.inert = false;
       root.classList.add('hidden');
       root.innerHTML = '';
-      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+      // The previously-focused element may have been removed from the DOM while the
+      // dialog was open (e.g. a re-rendered list) — focusing a detached node is a
+      // silent no-op that strands keyboard focus at the top of the document.
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
       resolve(result);
     };
+    openDialog = close;
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); close(false); return; }
       if (e.key !== 'Tab') return;

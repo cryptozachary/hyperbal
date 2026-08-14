@@ -1,13 +1,12 @@
 import { fmtUsd, fmtNum, fmtTime, cls, esc } from './format.js';
 import * as api from './api.js';
-import { skeletonRows, errMsg } from './feedback.js';
+import { skeletonRows, toast, errMsg } from './feedback.js';
 
 const $ = (id) => document.getElementById(id);
 
 const view = { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false };
 let address = null;
 let reloadTimer = null;
-let onError = () => {};
 
 // Pre-migration rows have no dir; fall back to the raw HL side (B = bid/buy, A = ask/sell).
 const dirText = (f) => f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : '—');
@@ -39,9 +38,20 @@ function paint() {
   $('fillsNext').disabled = view.offset + view.limit >= view.total;
 }
 
+// A failed fetch when we had nothing on screen yet (skeleton rows showing) must not
+// leave them shimmering forever, but repainting with the unchanged (empty) view.rows
+// would falsely assert "No trades recorded" when the truth is "we don't know" —
+// so this replaces the skeleton with an explicit unknown-state row instead of
+// routing through paint(). A failure with real rows already on screen leaves them
+// alone; the toast is the only signal.
+function errorRow(tbody) {
+  tbody.innerHTML = '<tr><td colspan="7" class="empty">Couldn\'t load trade history.</td></tr>';
+}
+
 export async function load(retried = false) {
   if (!address) { view.rows = []; view.total = 0; paint(); return; }
-  if (view.rows.length === 0) skeletonRows($('fills').querySelector('tbody'), 7);
+  const showedSkeleton = view.rows.length === 0;
+  if (showedSkeleton) skeletonRows($('fills').querySelector('tbody'), 7);
   try {
     const data = await api.getFills(address, view);
     // The page can fall off the end of the data (a purge elsewhere, another tab,
@@ -54,7 +64,10 @@ export async function load(retried = false) {
     view.rows = data.fills;
     view.total = data.total;
     paint();
-  } catch (err) { paint(); onError(errMsg(err)); } // repaint over the skeleton rows — a failed fetch must not leave them shimmering forever
+  } catch (err) {
+    if (showedSkeleton) errorRow($('fills').querySelector('tbody'));
+    toast(errMsg(err), 'error');
+  }
 }
 
 // New fills arrived. Re-read page 1 from the server rather than splicing them in:
@@ -69,6 +82,11 @@ export function scheduleReload() {
 export function setAddress(next) {
   address = next;
   view.offset = 0;
+  // Otherwise the previous wallet's rows stay on screen — undimmed, mislabelled —
+  // through the whole round trip, and skeletonRows() (gated on an empty view) never
+  // fires because view.rows still looks populated.
+  view.rows = [];
+  view.total = 0;
 }
 
 export function reset() {
@@ -81,8 +99,7 @@ export function reset() {
   paint();
 }
 
-export function mount(handlers) {
-  onError = handlers.onError;
+export function mount() {
   const setFilter = (closesOnly, activeBtn) => {
     document.querySelectorAll('#fillsAllBtn, #fillsClosesBtn').forEach((b) => b.classList.remove('active'));
     activeBtn.classList.add('active');

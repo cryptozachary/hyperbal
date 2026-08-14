@@ -22,7 +22,15 @@ function setEnabled(on) {
 export function setAddress(next) {
   address = next;
   $('exportYear').innerHTML = '';
+  // A stale truncated-sync note from the previous wallet must not survive the
+  // switch — sync() would otherwise resurrect it (via `prevText`) as a lying
+  // "click again to continue" for a wallet whose syncResume cursor is unrelated.
+  $('syncResult').textContent = '';
   setEnabled(Boolean(address));
+  // The picker is empty until loadPeriods() lands, and an empty picker silently
+  // means all-time — keep the downloads dark until it does. Sync doesn't read it.
+  $('exportDetailedBtn').disabled = true;
+  $('exportKoinlyBtn').disabled = true;
 }
 
 let periodsSeq = 0;

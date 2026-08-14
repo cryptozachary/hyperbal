@@ -94,7 +94,7 @@ async function init() {
   setStatus('Connecting…');
   chartPanel.mount();
 
-  fills.mount({ onError: showError });
+  fills.mount();
   exportsPanel.mount({ onSynced: () => fills.load() });
   wallets.mount({ onSelect: selectAddress, onEmpty: resetDashboard });
   $('refreshBtn').addEventListener('click', () => refresh(true));

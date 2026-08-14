@@ -108,11 +108,13 @@
     </section>
 
     <div id="error" class="error hidden"></div>
-    <div id="toasts" class="toasts" aria-live="polite"></div>
-    <div id="modalRoot" class="hidden"></div>
+    <div id="toasts" class="toasts"></div>
   </main>
 
   <footer class="foot">Read-only. Never enter private keys or seed phrases.</footer>
+  <!-- Direct child of <body>, not <main>: confirmDialog() makes every OTHER body
+       child inert while open, so this can't itself be nested inside one of them. -->
+  <div id="modalRoot" class="hidden"></div>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
