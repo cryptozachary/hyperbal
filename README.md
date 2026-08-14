@@ -17,14 +17,22 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   relayed through the backend to your browser. Falls back to REST polling (every
   30s) automatically if the socket drops, and reconnects.
 - **Summary cards:** Account Equity, Total Unrealized PnL, Total Realized PnL
-  (cumulative), Open Positions count.
+  (cumulative), Open Positions count (with a long/short split). Each card carries
+  a 20px sparkline and a 24-hour delta — the delta is always 24h, independent of
+  whatever range the chart below is showing.
 - **Positions table:** Coin, Side, Size, Entry Price, Mark Price, Liquidation
   Price, Leverage, Margin Used, Unrealized PnL, ROE %.
 - **Equity / PnL history chart** — hand-drawn on a `<canvas>` (no chart library),
-  backed by snapshots persisted in SQLite.
-- **Watched wallets** — add wallets and they persist across restarts; delete one
-  with the **✕ Delete** button (after a confirmation, since deleting also purges
-  that wallet's stored history — see Limitations).
+  with dollar and date axes, gridlines, a gradient area fill, a crosshair that
+  snaps to the nearest snapshot with a value/timestamp tooltip, a pinned
+  last-value pill, and 24h / 7d / 30d / All range selection with a
+  change-over-range readout. Gaps in the data (snapshots taken before PnL
+  capture, or before the dashboard was running) render as gaps, not as a drop to
+  zero. Sparse ranges say how few snapshots they contain rather than drawing a
+  confident line through three points.
+- **Watched wallets** — a switcher in the header opens a popover listing every
+  saved wallet, with an add field and a per-wallet delete (confirmed, since
+  deleting also purges that wallet's stored history — see Limitations).
 - **Agent wallet recognition** — paste a Hyperliquid agent (API) wallet address and
   it automatically resolves to the master account it signs for (agent wallets hold
   no funds), with a badge showing the relationship. A **Connected Agent Wallets**
@@ -37,7 +45,8 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   keeps growing beyond Hyperliquid's limited recent-fills window.
 - **Trade history** — a paginated table of every fill this dashboard has observed
   (time, coin, direction, size, price, fee, realized PnL), with a **closes only**
-  filter. New fills append live.
+  filter. New fills append live. Side/direction render as colored chips, and its
+  empty state offers an inline **Sync full history** button.
 - **Funding payments** — captured alongside fills and included in exports. On perps
   these are a real cash flow, often more numerous than the trades themselves.
 - **CSV export for tax** — download a full transaction record for a calendar year
@@ -47,13 +56,18 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   `userFillsByTime` and `userFunding`, filling in direction, builder fees, and
   transaction hashes on rows recorded before those were captured. Idempotent —
   safe to re-run.
-- Clear loading, empty, and error states. Positive/negative PnL coloring.
-- Responsive (desktop + mobile).
+- Shimmer loading skeletons, toasts for non-blocking failures, a focus-trapped
+  confirm dialog (no `window.confirm()`), and a persistent inline error region
+  for failures that leave the page unusable. Positive/negative PnL coloring.
+- Responsive (desktop + mobile): tables scroll horizontally within their panel
+  with the first column pinned, and the wallet popover becomes a bottom sheet
+  on narrow screens.
 
 ## Tech stack
 
-Vanilla HTML/CSS/JS frontend (no frameworks, no chart library). Node.js + Express
-backend. `better-sqlite3` for persistence, `ws` for WebSockets, `dotenv` for config.
+Vanilla HTML/CSS/JS frontend, split into native ES modules with no build step
+(no frameworks, no bundler, no chart library). Node.js + Express backend.
+`better-sqlite3` for persistence, `ws` for WebSockets, `dotenv` for config.
 
 ## Requirements
 
@@ -88,9 +102,10 @@ cp .env.example .env
 You can set the wallet **two ways** (no address is hardcoded anywhere):
 
 1. **Environment:** set `DEFAULT_WALLET=0x...` to pre-load a wallet on startup.
-2. **In the UI:** type a `0x…` address into the **Add** field. Saved wallets
-   appear in the dropdown and persist across restarts; delete one with the
-   **✕ Delete** button (this also erases its stored history — see Limitations).
+2. **In the UI:** open the wallet switcher in the header and type a `0x…`
+   address into its **Add a wallet** field. Saved wallets appear in the
+   switcher's popover list and persist across restarts; delete one with its
+   **✕** (this also erases its stored history — see Limitations).
 
 To point at **testnet**, set `HL_API_URL=https://api.hyperliquid-testnet.xyz/info`
 and `HL_WS_URL=wss://api.hyperliquid-testnet.xyz/ws`.
@@ -101,8 +116,9 @@ and `HL_WS_URL=wss://api.hyperliquid-testnet.xyz/ws`.
 npm start
 ```
 
-Then open <http://localhost:3000>. Add a wallet address (or set `DEFAULT_WALLET`)
-and the dashboard will populate and update live.
+Then open <http://localhost:3000>. Add a wallet address via the wallet switcher
+in the header (or set `DEFAULT_WALLET`) and the dashboard will populate and
+update live.
 
 ## Test
 
@@ -111,7 +127,46 @@ npm test
 ```
 
 Runs the unit tests (config, DB layer, normalizers/validation, account assembly,
-and the WebSocket stream) via Node's built-in test runner.
+the WebSocket stream, CSV export, plus the frontend formatters and chart
+geometry) via Node's built-in test runner.
+
+### Manual verification checklist
+
+The automated suite covers logic and geometry, not rendered pixels or browser
+focus behavior. Run `npm start` and check these by hand after any UI change:
+
+- Live WebSocket updates land in the cards and prepend to Trade History; the
+  status badge shows Live, and stopping the server flips it to Polling.
+- Chart: gridlines align with their y-axis labels; the crosshair snaps to the
+  nearest snapshot and its tooltip flips to the left when hovering near the
+  right edge; the pinned last-value pill hides itself when the tooltip would
+  otherwise cover it; the PnL series renders gaps (not a drop to zero) where
+  snapshots predate PnL capture.
+- Range pills (24h/7d/30d/All): clicking one refetches and redraws only the
+  chart and its change readout — the card deltas do not move.
+- The Equity/PnL toggle updates both the chart and the change readout.
+- Trade History paging, the closes-only filter, and the page clamp (page to
+  the end, then Sync) all behave.
+- Click **Sync full history** twice, then open the period picker — the year
+  options must not duplicate.
+- Switch wallets A→B→A, then open the period picker — it lists only the
+  current wallet's years, not both wallets' merged.
+- Adding a wallet, switching wallets, and deleting the last wallet all work.
+- Delete a wallet that is **not** currently selected — the dashboard on
+  screen must not change.
+- Wallet popover: Escape, an outside click, and Tab-out of its last control
+  all close it, and focus returns sensibly (to the switcher, or wherever the
+  user's own tab order was headed).
+- Both CSV downloads fire, and the period picker lists years correctly.
+- Agent badge and Connected Agent Wallets panel render.
+- Layout holds at 1440 / 768 / 375px with no horizontal scroll on the page
+  itself. At 375px specifically: tables scroll inside their own panel with
+  the first column pinned, and the wallet popover is a bottom sheet.
+- OS "reduce motion" disables the loading shimmer, the status dot's pulse,
+  and transitions.
+- Sticky table headers keep a visible bottom border while the table scrolls
+  under them (the tables use `border-collapse:collapse`, which can drop a
+  sticky header's border — this one can only be checked in a browser).
 
 ## Hyperliquid endpoints used
 
@@ -239,8 +294,19 @@ hl-stream.js       Upstream WebSocket client to Hyperliquid
 ws-server.js       Browser-facing WebSocket hub (/ws)
 public/
   index.html       Dashboard markup
-  styles.css       Dark theme
-  app.js           Client logic: REST load, live WS, fallback polling, chart
+  styles.css       Dark theme + design tokens
+  js/
+    app.js         Entry point: state, WebSocket, polling, wiring
+    api.js         Route definitions (the only file holding URL strings)
+    format.js      Pure formatters
+    chart-math.js  Pure geometry (ticks, scales, nearest point)
+    chart.js       Canvas chart: axes, crosshair, sparklines
+    chart-panel.js Chart panel state: range/series selection, fetch, readout
+    account.js     Summary cards + positions table
+    fills.js       Trade history table
+    wallets.js     Wallet switcher popover
+    exports.js     Export panel + history sync
+    feedback.js    Toasts, skeletons, confirm dialog
 test/              Unit tests (node:test)
 data/              SQLite DB (created at runtime, gitignored)
 ```
