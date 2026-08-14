@@ -37,7 +37,14 @@ const valueOf = (p, series) => (series === 'equity' ? p.equity : p.unrealized_pn
 // the chart's call, not chart-math's, so this lives here rather than in niceTicks.
 function tickLabels(ticks) {
   const compact = ticks.map(fmtCompact);
-  return new Set(compact).size === compact.length ? compact : ticks.map(fmtUsd);
+  if (new Set(compact).size !== compact.length) return ticks.map(fmtUsd);
+  // fmtCompact's trimUnit strips a trailing ".0" — correct for a single value, wrong
+  // for a column, where e.g. $1800/$1900/$2000/$2100 renders as "$1.8k, $1.9k, $2k,
+  // $2.1k". If any label in the set kept a decimal, force the whole set to one
+  // decimal place so the column shares a single precision. fmtCompact itself is
+  // left alone — other callers want the trimmed form.
+  if (!compact.some((l) => /\.\d/.test(l))) return compact;
+  return compact.map((l) => l.replace(/^([-]?\$)(\d+)([kMB])$/, '$1$2.0$3'));
 }
 
 // The series being empty and there being no snapshots at all are different facts,
@@ -52,9 +59,23 @@ function emptyMessage(total, drawable, series) {
   return [`Only ${drawable} point in this range.`, 'Snapshots accrue while the dashboard is open.'];
 }
 
+// Some Safari versions in the wild still lack ctx.roundRect; draw it by hand.
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 export function createChart(canvas) {
   let points = [];
   let opts = { series: 'equity' };
+  // -1 means no hover; reset on every render() since a fresh dataset invalidates
+  // whatever index the pointer was last resolved against.
+  let hoverIndex = -1;
 
   function draw() {
     // An unlaid-out canvas (0 width/height — e.g. mid wallet-switch, or before the
@@ -170,6 +191,80 @@ export function createChart(canvas) {
       ctx.fillText(`${drawable.length} snapshots`, x0 + 4, y0 + 10);
     }
 
+    // --- last-value pill geometry (drawn below, after we know whether the
+    // hover tooltip would land on top of it) ---
+    const lastIdx = runs[runs.length - 1][runs[runs.length - 1].length - 1].i;
+    const lastVal = values[lastIdx];
+    const pillText = fmtUsd(lastVal);
+    const pillW = ctx.measureText(pillText).width + 16;
+    const pillH = 20;
+    const pillX = x1 - pillW;
+    const pillY = Math.min(Math.max(s.y(lastVal) - 10, y0), y1 - pillH);
+
+    // --- crosshair + tooltip geometry ---
+    let hover = null;
+    if (hoverIndex >= 0 && hoverIndex < n && values[hoverIndex] != null) {
+      const hx = s.x(hoverIndex, n), hy = s.y(values[hoverIndex]);
+      const when = new Date(points[hoverIndex].ts).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+      const what = fmtUsd(values[hoverIndex]);
+      const boxW = Math.max(ctx.measureText(when).width, ctx.measureText(what).width) + 24;
+      const boxH = 42;
+      // Placement is pure geometry, and lives in chart-math.js so it can be tested.
+      const { bx, by } = tooltipBox({ hx, hy, boxW, boxH, plot: s.plot });
+      hover = { hx, hy, when, what, bx, by, boxW, boxH };
+    }
+
+    // The pill and the flipped tooltip both live at the right edge, so hovering
+    // near the last point can land one on top of the other. The tooltip paints
+    // opaque, so an unconditional draw order would leave the pill looking cut
+    // off; skip the pill outright when their boxes overlap — the tooltip already
+    // shows the same value with more precision.
+    const pillHidden = hover
+      && hover.bx < pillX + pillW && hover.bx + hover.boxW > pillX
+      && hover.by < pillY + pillH && hover.by + hover.boxH > pillY;
+
+    if (!pillHidden) {
+      ctx.fillStyle = hexA(stroke, 0.12);
+      ctx.strokeStyle = hexA(stroke, 0.45);
+      roundRect(ctx, pillX, pillY, pillW, pillH, 10);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = stroke;
+      ctx.textAlign = 'center';
+      ctx.fillText(pillText, pillX + pillW / 2, pillY + 14);
+      ctx.textAlign = 'left';
+    }
+
+    if (hover) {
+      const { hx, hy, when, what, bx, by, boxW, boxH } = hover;
+      // save/restore scopes the dash so it can't leak into the next frame's
+      // gridlines or line stroke.
+      ctx.save();
+      ctx.strokeStyle = token('--accent', '#6c8cff');
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(hx, y0); ctx.lineTo(hx, y1); ctx.stroke();
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(hx, hy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = token('--bg', '#0b0e14');
+      ctx.fill();
+      ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke();
+
+      ctx.fillStyle = token('--surface-3', '#10151f');
+      ctx.strokeStyle = token('--line', '#222b3d');
+      ctx.lineWidth = 1;
+      roundRect(ctx, bx, by, boxW, boxH, 8);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = COLORS.muted;
+      ctx.fillText(when, bx + 12, by + 17);
+      ctx.fillStyle = COLORS.text;
+      ctx.font = '600 13px system-ui, sans-serif';
+      ctx.fillText(what, bx + 12, by + 33);
+      ctx.font = '10px system-ui, sans-serif';
+    }
+
     canvas._scales = { s, n, span, values };
   }
 
@@ -217,14 +312,43 @@ export function createChart(canvas) {
   };
   window.addEventListener('resize', onResize);
 
+  // Pointer events rather than mouse events, so a touch drag scrubs the chart.
+  function onPointerMove(e) {
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const st = canvas._scales;
+    // _scales is cleared at the top of every draw() and only reassigned at the
+    // end, so a caught mid-draw throw (see safeDraw) leaves it null here.
+    if (!st || st.n < 2) return;
+    // Hit-testing is pure geometry, and lives in chart-math.js so it can be
+    // tested; -1 means the pointer left the plot, which clears the crosshair.
+    const idx = pointerToIndex(px, st.s.plot, points);
+    if (idx !== hoverIndex) {
+      hoverIndex = idx;
+      // Route through safeDraw, not draw(), so a throw triggered while hovering
+      // gets the same fallback the initial render and resize paths get.
+      safeDraw();
+    }
+  }
+  function onPointerLeave() {
+    if (hoverIndex !== -1) { hoverIndex = -1; safeDraw(); }
+  }
+
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerleave', onPointerLeave);
+  canvas.style.touchAction = 'pan-y'; // let vertical page scroll through, scrub horizontally
+
   return {
     render(nextPoints, nextOpts = {}) {
+      hoverIndex = -1;
       points = nextPoints || [];
       opts = { ...opts, ...nextOpts };
       safeDraw();
     },
     destroy() {
       window.removeEventListener('resize', onResize);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
       if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
     },
   };
