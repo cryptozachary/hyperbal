@@ -21,7 +21,13 @@ function renderChange() {
   const el = $('chartChange');
   if (!el) return;
   const values = history.map((p) => (series === 'equity' ? p.equity : p.unrealized_pnl));
-  const r = changeReadout(rangeChange(values), RANGE_LABEL[range]);
+  // Label with paintedRange, not range: `range` is what the user asked for (may
+  // still be in flight, e.g. a pill click with the fetch not yet resolved), while
+  // `paintedRange` is what `history` actually holds. The readout describes the
+  // data on screen, not the pending request — paint() can run mid-flight (the
+  // series toggle calls it directly, without going through load()), and during
+  // that window the two can disagree.
+  const r = changeReadout(rangeChange(values), RANGE_LABEL[paintedRange]);
   el.textContent = r.text;
   el.className = ('chart-change ' + r.cls).trim();
 }
