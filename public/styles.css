@@ -85,8 +85,6 @@ th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppe
 .side-long{color:var(--pos);font-weight:600} .side-short{color:var(--neg);font-weight:600}
 .empty,.error{padding:var(--sp-5);text-align:center;color:var(--muted)}
 .error{color:var(--neg);border:1px solid var(--neg-a40);border-radius:var(--r-md);margin-top:14px}
-.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:var(--scrim-50);border-radius:var(--r-lg);font-size:16px;color:var(--muted)}
 .hidden{display:none}
 .foot{text-align:center;color:var(--muted);padding:var(--sp-4);font-size:var(--fs-sm);border-top:1px solid var(--line)}
 @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}input{min-width:160px}}
@@ -115,3 +113,48 @@ th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppe
 /* Custom button colors override the UA's disabled greying — restate it here so a
    disabled export control actually looks disabled. Matches the pager. */
 .export-row select:disabled,.export-row button:disabled,#syncBtn:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+
+/* ---- toasts ---- */
+.toasts{position:fixed;right:var(--sp-4);bottom:var(--sp-4);display:flex;flex-direction:column;
+  gap:var(--sp-2);z-index:60;max-width:min(360px,calc(100vw - var(--sp-6)))}
+.toast{background:var(--surface-2);border:1px solid var(--line);border-left-width:3px;
+  border-radius:var(--r-md);padding:var(--sp-3);font-size:var(--fs-sm);color:var(--text);
+  box-shadow:var(--shadow-pop);cursor:pointer;animation:toast-in var(--dur) var(--ease)}
+.toast-success{border-left-color:var(--pos)}
+.toast-error{border-left-color:var(--neg)}
+.toast-info{border-left-color:var(--accent)}
+.toast.leaving{opacity:0;transition:opacity var(--dur) var(--ease)}
+@keyframes toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ---- skeletons ---- */
+.shimmer{display:block;height:12px;border-radius:var(--r-sm);
+  background:linear-gradient(90deg,var(--surface-2) 25%,var(--line) 37%,var(--surface-2) 63%);
+  background-size:400% 100%;animation:shimmer 1.4s linear infinite}
+@keyframes shimmer{from{background-position:100% 0}to{background-position:0 0}}
+.is-loading .card-value,.is-loading .card-sub{color:transparent;position:relative}
+.is-loading .card-value::after{content:"";position:absolute;inset:2px 30% 2px 0;border-radius:var(--r-sm);
+  background:var(--surface-2);animation:shimmer 1.4s linear infinite;
+  background-image:linear-gradient(90deg,var(--surface-2) 25%,var(--line) 37%,var(--surface-2) 63%);
+  background-size:400% 100%}
+.is-loading canvas{opacity:.35}
+
+/* ---- modal ---- */
+.modal-backdrop{position:fixed;inset:0;background:var(--scrim-62);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;z-index:70;padding:var(--sp-4)}
+.modal{background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:var(--sp-5);max-width:440px;box-shadow:var(--shadow-pop)}
+.modal h3{margin:0 0 var(--sp-2);font-size:var(--fs-lg)}
+.modal-body{margin:0 0 var(--sp-4);color:var(--muted);font-size:var(--fs-base);line-height:1.6}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2)}
+.btn{background:var(--bg2);color:var(--text);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:var(--sp-2) var(--sp-3);font-size:var(--fs-sm);cursor:pointer}
+.btn-danger{color:var(--neg);border-color:var(--neg-a40)}
+.btn-danger:hover{background:var(--neg-a12)}
+
+/* ---- status dot ---- */
+.status-dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;
+  margin-right:var(--sp-1)}
+.badge.live .status-dot{animation:pulse 2s var(--ease) infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--pos-a40)}50%{box-shadow:0 0 0 4px transparent}}
+
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

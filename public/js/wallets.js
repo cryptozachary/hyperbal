@@ -1,10 +1,11 @@
 import * as api from './api.js';
 import { short, esc } from './format.js';
+import { confirmDialog, toast, errMsg } from './feedback.js';
 
 const $ = (id) => document.getElementById(id);
 
 let meta = {};
-let handlers = { onSelect: () => {}, onEmpty: () => {}, onError: () => {} };
+let handlers = { onSelect: () => {}, onEmpty: () => {} };
 
 export const metaFor = (address) => meta[address];
 
@@ -73,14 +74,15 @@ export function mount(h) {
   handlers = h;
   $('addBtn').addEventListener('click', async () => {
     const address = $('walletInput').value.trim().toLowerCase();
-    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) { handlers.onError('Invalid wallet address.'); return; }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) { toast('Invalid wallet address.', 'error'); return; }
     try {
       const { resolved } = await api.addWallet(address);
       $('walletInput').value = '';
       const canonical = resolved?.address || address;
       await load(canonical);
       await handlers.onSelect(canonical);
-    } catch (e) { handlers.onError(e.message); }
+      toast('Wallet added', 'success');
+    } catch (e) { toast(errMsg(e), 'error'); }
   });
   $('removeBtn').addEventListener('click', async () => {
     const a = selectedValue();
@@ -89,14 +91,19 @@ export function mount(h) {
     const name = m?.label ? `${m.label} (${short(a)})` : short(a);
     // Purging is irreversible: realized PnL is cumulative since first observed and
     // Hyperliquid only re-serves a limited recent window.
-    if (!confirm(`Delete ${name}?\n\nThis also erases its stored trade history and equity snapshots. This cannot be undone.`)) return;
+    const ok = await confirmDialog({
+      title: `Delete ${name}?`,
+      body: 'This also erases its stored trade history and equity snapshots. This cannot be undone.',
+    });
+    if (!ok) return;
     try {
       await api.deleteWallet(a);
+      toast(`Deleted ${name}`, 'success');
       await load();
       const next = selectedValue();
       if (next) await handlers.onSelect(next);
       else handlers.onEmpty();
-    } catch (e) { handlers.onError(e.message); }
+    } catch (e) { toast(errMsg(e), 'error'); }
   });
   $('walletSelect').addEventListener('change', (e) => handlers.onSelect(e.target.value));
 }

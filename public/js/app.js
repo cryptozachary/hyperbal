@@ -4,6 +4,7 @@ import * as fills from './fills.js';
 import * as exportsPanel from './exports.js';
 import * as wallets from './wallets.js';
 import * as chartPanel from './chart-panel.js';
+import { setStatus, setLoading, errMsg } from './feedback.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -11,14 +12,8 @@ const state = {
   address: null, ws: null, pollTimer: null, refreshTimer: null, wsConnected: false,
 };
 
-function setStatus(text, kind) {
-  const el = $('status');
-  el.textContent = text;
-  el.className = 'badge ' + (kind || '');
-}
 function showError(msg) { const e = $('error'); e.textContent = msg; e.classList.remove('hidden'); }
 function clearError() { $('error').classList.add('hidden'); }
-function setLoading(on) { $('loading').classList.toggle('hidden', !on); }
 
 async function refresh(showLoad = true) {
   if (!state.address) return;
@@ -29,7 +24,7 @@ async function refresh(showLoad = true) {
     account.render(data);
     await chartPanel.load();
     await fills.load();
-  } catch (err) { showError(err.message); }
+  } catch (err) { showError(errMsg(err)); } // failing here leaves the page empty — inline region, not a toast
   finally { setLoading(false); }
 }
 
@@ -101,7 +96,7 @@ async function init() {
 
   fills.mount({ onError: showError });
   exportsPanel.mount({ onSynced: () => fills.load() });
-  wallets.mount({ onSelect: selectAddress, onEmpty: resetDashboard, onError: showError });
+  wallets.mount({ onSelect: selectAddress, onEmpty: resetDashboard });
   $('refreshBtn').addEventListener('click', () => refresh(true));
 
   // bootstrap: saved wallets + default (resolve in case DEFAULT_WALLET is an agent address)

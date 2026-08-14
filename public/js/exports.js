@@ -1,4 +1,5 @@
 import * as api from './api.js';
+import { toast, errMsg } from './feedback.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -52,7 +53,21 @@ export async function loadPeriods() {
       el.value = o.value; el.textContent = o.text;
       sel.appendChild(el);
     }
-  } catch { /* leave the picker empty; the download buttons will report the error */ }
+    // A previous failed getRange may have disabled these — a successful refill
+    // re-enables them rather than leaving a stale year-scoped export silently
+    // degraded to all-time.
+    $('exportDetailedBtn').disabled = false;
+    $('exportKoinlyBtn').disabled = false;
+  } catch (e) {
+    if (seq !== periodsSeq || want !== address) return;
+    // Leaving the picker empty used to also leave the download buttons enabled, so
+    // a year-scoped export silently degraded to all-time. This doesn't leave the
+    // dashboard unusable, so it's a toast, not the inline #error region — but the
+    // buttons stay disabled until a later loadPeriods() succeeds.
+    $('exportDetailedBtn').disabled = true;
+    $('exportKoinlyBtn').disabled = true;
+    toast('Could not load export periods: ' + errMsg(e), 'error');
+  }
 }
 
 function download(format) {
@@ -76,7 +91,14 @@ async function sync() {
   if (!address) return;
   const out = $('syncResult');
   $('syncBtn').disabled = true;
+  // A failure now toasts instead of overwriting this line — save what was here
+  // (e.g. a still-valid truncated-sync note) so a failed attempt can restore it
+  // instead of leaving "Syncing…" stuck on screen.
+  const prevText = out.textContent;
   out.textContent = 'Syncing from Hyperliquid…';
+  // Defect fix: loadPeriods() below refills the picker and the browser resets the
+  // selection to the first option — capture what was selected so we can restore it.
+  const prevYear = $('exportYear').value;
   try {
     // Resume where a previous truncated run stopped. Without carrying these the
     // next run would restart at 0, re-scan what it already has, and stop in the
@@ -92,15 +114,24 @@ async function sync() {
         `${r.fills.enriched} existing fills completed`,
         `${r.funding.inserted} funding entries`,
       ];
-      if (r.truncated) syncResume[address] = { fills: r.fills.nextFrom, funding: r.funding.nextFrom };
-      else delete syncResume[address];
-      out.textContent = `Synced: ${bits.join(', ')}.` +
-        (r.truncated ? ' Stopped at the page limit — click again to continue from here.' : '');
+      if (r.truncated) {
+        syncResume[address] = { fills: r.fills.nextFrom, funding: r.funding.nextFrom };
+        // Actionable and only explained here — this must not fade like a toast.
+        out.textContent = `Synced: ${bits.join(', ')}. Stopped at the page limit — click again to continue from here.`;
+      } else {
+        delete syncResume[address];
+        out.textContent = '';
+        toast(`Synced: ${bits.join(', ')}.`, 'success');
+      }
     }
     await onSynced();
     await loadPeriods();
+    // Restore the previously selected period if the refilled picker still has it.
+    const sel = $('exportYear');
+    if (prevYear && [...sel.options].some((o) => o.value === prevYear)) sel.value = prevYear;
   } catch (e) {
-    out.textContent = `Sync failed: ${e.message}`;
+    out.textContent = prevText;
+    toast('Sync failed: ' + errMsg(e), 'error');
   } finally {
     $('syncBtn').disabled = false;
   }

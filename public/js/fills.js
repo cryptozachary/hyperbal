@@ -1,5 +1,6 @@
 import { fmtUsd, fmtNum, fmtTime, cls, esc } from './format.js';
 import * as api from './api.js';
+import { skeletonRows, errMsg } from './feedback.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,6 +41,7 @@ function paint() {
 
 export async function load(retried = false) {
   if (!address) { view.rows = []; view.total = 0; paint(); return; }
+  if (view.rows.length === 0) skeletonRows($('fills').querySelector('tbody'), 7);
   try {
     const data = await api.getFills(address, view);
     // The page can fall off the end of the data (a purge elsewhere, another tab,
@@ -52,7 +54,7 @@ export async function load(retried = false) {
     view.rows = data.fills;
     view.total = data.total;
     paint();
-  } catch (err) { onError(err.message); }
+  } catch (err) { paint(); onError(errMsg(err)); } // repaint over the skeleton rows — a failed fetch must not leave them shimmering forever
 }
 
 // New fills arrived. Re-read page 1 from the server rather than splicing them in:
