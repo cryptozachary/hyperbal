@@ -10,12 +10,26 @@
   <header class="topbar">
     <div class="brand">⚡ Hyperliquid PnL</div>
     <div class="controls">
-      <select id="walletSelect" aria-label="Saved wallets"></select>
-      <input id="walletInput" type="text" placeholder="0x… wallet address" autocomplete="off" spellcheck="false" />
-      <button id="addBtn">Add</button>
-      <button id="removeBtn" title="Delete the selected wallet and its stored history">✕ Delete</button>
+      <button id="walletSwitcher" class="switcher" aria-expanded="false" aria-haspopup="dialog">
+        <span class="avatar" id="walletAvatar"></span>
+        <span class="switcher-text">
+          <span class="switcher-name" id="walletName">No wallet</span>
+          <span class="switcher-sub" id="walletCount"></span>
+        </span>
+        <span class="switcher-caret">▾</span>
+      </button>
       <button id="refreshBtn">↻ Refresh</button>
       <span id="status" class="badge">—</span>
+    </div>
+    <div id="walletPop" class="pop hidden" role="dialog" aria-label="Watched wallets">
+      <div class="lbl">Watched wallets</div>
+      <div id="walletList"></div>
+      <div class="pop-divider"></div>
+      <div class="lbl">Add a wallet</div>
+      <div class="pop-add">
+        <input id="walletInput" type="text" placeholder="0x… public address" autocomplete="off" spellcheck="false" />
+        <button id="addBtn">Add</button>
+      </div>
     </div>
   </header>
 
