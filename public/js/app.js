@@ -67,10 +67,11 @@ async function selectAddress(address) {
   state.address = address;
   state.history = [];
   fills.setAddress(address);
-  wallets.renderBadge(address);
+  exportsPanel.setAddress(address);   // synchronous, in step with the others
+  wallets.setCurrent(address);
   await refresh(true);
   await wallets.renderAgents(address);
-  await exportsPanel.setAddress(address);
+  await exportsPanel.loadPeriods();   // same position as before, ordering preserved
   if (state.wsConnected) state.ws.send(JSON.stringify({ type: 'watch', address }));
 }
 

@@ -16,12 +16,18 @@ function setEnabled(on) {
   for (const id of ['exportYear', 'exportDetailedBtn', 'exportKoinlyBtn', 'syncBtn']) $(id).disabled = !on;
 }
 
-export async function setAddress(next) {
+// Synchronous: must land in the same block as the other panels' address
+// assignment, or the export buttons stay live pointing at the previous wallet.
+export function setAddress(next) {
   address = next;
+  $('exportYear').innerHTML = '';
+  setEnabled(Boolean(address));
+}
+
+// Async: fetches the available years.
+export async function loadPeriods() {
+  if (!address) return;
   const sel = $('exportYear');
-  sel.innerHTML = '';
-  if (!address) { setEnabled(false); return; }
-  setEnabled(true);
   try {
     const { minTs, maxTs } = await api.getRange(address);
     const opts = [];
@@ -82,7 +88,7 @@ async function sync() {
         (r.truncated ? ' Stopped at the page limit — click again to continue from here.' : '');
     }
     await onSynced();
-    await setAddress(address);
+    await loadPeriods();
   } catch (e) {
     out.textContent = `Sync failed: ${e.message}`;
   } finally {

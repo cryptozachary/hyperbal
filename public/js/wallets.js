@@ -28,7 +28,7 @@ export async function load(selected) {
 
 export const selectedValue = () => $('walletSelect').value;
 
-export function renderBadge(address) {
+export function setCurrent(address) {
   const m = meta[address];
   const el = $('walletBadge');
   if (m && m.viaAgent) {
@@ -63,6 +63,8 @@ export async function renderAgents(address) {
 }
 
 export function reset() {
+  meta = {};
+  $('walletSelect').innerHTML = '';
   $('agentsPanel').innerHTML = '';
   $('walletBadge').classList.add('hidden');
 }
