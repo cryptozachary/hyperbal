@@ -52,7 +52,7 @@
       "blockedBy": [
         1
       ],
-      "description": "**Goal:** Build and prove the pure geometry the chart needs, before any canvas code depends on it.\n\n**Files:**\n- Create: public/js/chart-math.js, test/chart-math.test.js\n\n**Verify:** `node --test test/chart-math.test.js`\n\n```json:metadata\n{\"files\": [\"public/js/chart-math.js\", \"test/chart-math.test.js\"], \"verifyCommand\": \"node --test test/chart-math.test.js\", \"acceptanceCriteria\": [\"niceTicks gives 3-6 ticks on 1/2/5 boundaries for ordinary, zero-spanning, sub-unit and flat ranges\", \"computeScales centers a flat series instead of dividing by zero\", \"nearestIndex correct on empty, single-point, exact-match and out-of-range input\", \"segments splits on nulls\", \"module references no DOM global\"]}\n```"
+      "description": "**Goal:** Build and prove the pure geometry the chart needs, before any canvas code depends on it.\n\n**Files:**\n- Create: public/js/chart-math.js, test/chart-math.test.js\n\n**Verify:** `node --test test/chart-math.test.js`\n\n```json:metadata\n{\"files\": [\"public/js/chart-math.js\", \"test/chart-math.test.js\"], \"verifyCommand\": \"node --test test/chart-math.test.js\", \"acceptanceCriteria\": [\"niceTicks gives 3-6 ticks on 1/2/5 boundaries for ordinary, zero-spanning, sub-unit and flat ranges\", \"computeScales centers a flat series instead of dividing by zero\", \"nearestIndex correct on empty, single-point, exact-match and out-of-range input\", \"segments splits on nulls\", \"pointerToIndex hit-tests with an 8px edge slack and returns -1 outside the plot\", \"tooltipBox flips left near the right edge and clamps inside the plot\", \"module references no DOM global\"]}\n```"
     },
     {
       "id": 7,
@@ -124,5 +124,5 @@
       "description": "**Goal:** Bring the README in line with what the app now does, and run the whole manual checklist once.\n\n**Files:**\n- Modify: README.md\n\n**Verify:** `npm test`; full manual checklist in the plan\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Features section describes the interactive chart and the switcher popover\", \"Project structure block reflects public/js/\", \"no chart library claim still present and still true\", \"Test section mentions the frontend unit tests\", \"full manual checklist passes\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-08-14T09:45:00.000Z"
+  "lastUpdated": "2026-08-14T10:15:00.000Z"
 }

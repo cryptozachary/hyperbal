@@ -1331,7 +1331,17 @@ git commit -m "feat(ui): toasts, skeletons, focus-trapped confirm dialog, status
 - [ ] `computeScales` centers a flat series instead of dividing by zero
 - [ ] `nearestIndex` is correct on empty, single-point, exact-match, and out-of-range input
 - [ ] `segments` splits on nulls so the chart can draw gaps
+- [ ] `pointerToIndex` maps across the plot, forgives an 8px overshoot at each edge, and returns -1 outside it
+- [ ] `tooltipBox` flips left near the right edge and clamps inside the plot on both axes
+- [ ] `pickXLabels` degrades to fewer marks on short series
 - [ ] The module references no DOM global
+
+**Why the interaction geometry lives here rather than in `chart.js`:** no agent in
+this workflow can drive a browser, and `chart.js` reads CSS custom properties at
+module scope so Node cannot import it either. Hit-testing and tooltip placement
+written inline in the canvas code would be unverifiable by anyone until a human
+opened the page. As pure functions they are ordinary unit tests, and `chart.js`
+is left holding only the painting.
 
 **Verify:** `node --test test/chart-math.test.js` → PASS
 
@@ -1344,8 +1354,10 @@ Create `test/chart-math.test.js`:
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { niceStep, niceTicks, computeScales, nearestIndex, segments, rangeChange }
-  from '../public/js/chart-math.js';
+import {
+  niceStep, niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  pickXLabels, pointerToIndex, tooltipBox,
+} from '../public/js/chart-math.js';
 
 test('niceStep snaps to 1/2/5 x 10^n', () => {
   assert.equal(niceStep(0.7), 1);
@@ -1428,6 +1440,67 @@ test('rangeChange needs two finite points', () => {
   assert.equal(c.abs, 50);
   assert.equal(c.pct, 50);
   assert.equal(rangeChange([0, 10]).pct, null); // no percent from a zero base
+});
+
+// ---- Interaction geometry ----
+// These cover what would otherwise be unverifiable: no agent in this workflow can
+// drive a browser, so the crosshair's hit-testing and the tooltip's flip are only
+// checkable if they are pure.
+
+test('pickXLabels degrades gracefully on short series', () => {
+  assert.deepEqual(pickXLabels(0), []);
+  assert.deepEqual(pickXLabels(1), [0]);
+  assert.deepEqual(pickXLabels(2), [0, 1]);
+  assert.deepEqual(pickXLabels(3), [0, 1, 2]);
+  assert.deepEqual(pickXLabels(30), [0, 14, 29]);
+});
+
+const PLOT = { x0: 52, x1: 628, y0: 20, y1: 172 };
+const SERIES = [{ ts: 1000 }, { ts: 2000 }, { ts: 3000 }, { ts: 4000 }];
+const SPAN = 3000;
+
+test('pointerToIndex maps across the plot and rejects outside it', () => {
+  assert.equal(pointerToIndex(52, PLOT, SERIES, SPAN), 0);    // left edge
+  assert.equal(pointerToIndex(628, PLOT, SERIES, SPAN), 3);   // right edge
+  assert.equal(pointerToIndex(340, PLOT, SERIES, SPAN), 1);   // midpoint -> ts 2500, nearer 2000
+  assert.equal(pointerToIndex(0, PLOT, SERIES, SPAN), -1);    // well left
+  assert.equal(pointerToIndex(900, PLOT, SERIES, SPAN), -1);  // well right
+});
+
+test('pointerToIndex forgives a small overshoot at each edge', () => {
+  assert.equal(pointerToIndex(46, PLOT, SERIES, SPAN), 0);    // 6px left of x0, within slack
+  assert.equal(pointerToIndex(634, PLOT, SERIES, SPAN), 3);   // 6px right of x1
+  assert.equal(pointerToIndex(43, PLOT, SERIES, SPAN), -1);   // 9px left, past slack
+});
+
+test('pointerToIndex survives degenerate input', () => {
+  assert.equal(pointerToIndex(300, PLOT, [], SPAN), -1);
+  assert.equal(pointerToIndex(300, PLOT, [{ ts: 5 }], 0), 0);          // single point, zero span
+  assert.equal(pointerToIndex(300, { ...PLOT, x1: 52 }, SERIES, SPAN), 0); // zero-width plot
+});
+
+test('tooltipBox sits right of the crosshair when there is room', () => {
+  const { bx, by, flip } = tooltipBox({ hx: 100, hy: 96, boxW: 132, boxH: 42, plot: PLOT });
+  assert.equal(flip, false);
+  assert.equal(bx, 112);
+  assert.equal(by, 75);
+});
+
+test('tooltipBox flips left rather than overflowing the right edge', () => {
+  const { bx, flip } = tooltipBox({ hx: 600, hy: 96, boxW: 132, boxH: 42, plot: PLOT });
+  assert.equal(flip, true);
+  assert.equal(bx, 456);
+  assert.ok(bx >= PLOT.x0);
+});
+
+test('tooltipBox clamps vertically inside the plot', () => {
+  assert.equal(tooltipBox({ hx: 100, hy: 20, boxW: 132, boxH: 42, plot: PLOT }).by, PLOT.y0);
+  assert.equal(tooltipBox({ hx: 100, hy: 172, boxW: 132, boxH: 42, plot: PLOT }).by, PLOT.y1 - 42);
+});
+
+test('tooltipBox keeps a box wider than the plot on screen', () => {
+  const wide = tooltipBox({ hx: 600, hy: 96, boxW: 900, boxH: 42, plot: PLOT });
+  assert.equal(wide.bx, PLOT.x0); // clamped, not hanging off the left
 });
 ```
 
@@ -1523,6 +1596,47 @@ export function rangeChange(values) {
   const first = finite[0], last = finite[finite.length - 1];
   return { abs: last - first, pct: first === 0 ? null : ((last - first) / Math.abs(first)) * 100 };
 }
+
+// ---- Interaction geometry ----
+//
+// These three would naturally live inside chart.js's draw and pointer code, where
+// nothing could test them: chart.js reads CSS custom properties at module scope, so
+// Node cannot import it, and no agent in this workflow can drive a browser. Keeping
+// them here as pure functions is what makes the crosshair's behavior verifiable
+// rather than merely asserted.
+
+// Which point indices get an x-axis label. Three marks (first, middle, last) unless
+// the series is too short for that to be meaningful.
+export function pickXLabels(n) {
+  if (n <= 0) return [];
+  if (n === 1) return [0];
+  if (n === 2) return [0, n - 1];
+  return [0, Math.floor((n - 1) / 2), n - 1];
+}
+
+// Pointer x -> point index, or -1 when the pointer is outside the plot. `slack` is
+// the forgiveness band beyond each edge, so the crosshair doesn't drop out the
+// instant the cursor grazes the axis.
+export function pointerToIndex(px, plot, points, span, slack = 8) {
+  if (!points.length) return -1;
+  const { x0, x1 } = plot;
+  if (px < x0 - slack || px > x1 + slack) return -1;
+  if (x1 === x0 || span === 0) return 0;
+  const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
+  return nearestIndex(points, points[0].ts + frac * span);
+}
+
+// Where the tooltip box goes: to the right of the crosshair normally, flipped to the
+// left when it would overflow, and always clamped inside the plot vertically.
+export function tooltipBox({ hx, hy, boxW, boxH, plot, gap = 12 }) {
+  const { x0, x1, y0, y1 } = plot;
+  const flip = hx + gap + boxW > x1;
+  let bx = flip ? hx - gap - boxW : hx + gap;
+  // A box wider than the plot itself would otherwise hang off the left edge.
+  bx = Math.max(x0, Math.min(bx, x1 - boxW));
+  const by = Math.min(Math.max(hy - boxH / 2, y0), y1 - boxH);
+  return { bx, by, flip };
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1577,10 +1691,16 @@ canvas{width:100%;display:block;height:280px}
 
 ```js
 import { fmtCompact, fmtUsd, fmtAxisTime } from './format.js';
-import { niceTicks, computeScales, nearestIndex, segments, rangeChange } from './chart-math.js';
+import {
+  niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  pickXLabels, pointerToIndex, tooltipBox,
+} from './chart-math.js';
 
 // Re-exported so consumers have one import for chart concerns.
-export { niceTicks, computeScales, nearestIndex, segments, rangeChange };
+export {
+  niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  pickXLabels, pointerToIndex, tooltipBox,
+};
 
 const CSS = getComputedStyle(document.documentElement);
 const token = (name, fallback) => (CSS.getPropertyValue(name) || '').trim() || fallback;
@@ -1649,7 +1769,7 @@ export function createChart(canvas) {
     // --- x labels: first, middle, last ---
     const span = points[n - 1].ts - points[0].ts;
     ctx.fillStyle = COLORS.muted;
-    const marks = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+    const marks = pickXLabels(n);
     marks.forEach((i, k) => {
       ctx.textAlign = k === 0 ? 'left' : k === marks.length - 1 ? 'right' : 'center';
       ctx.fillText(fmtAxisTime(points[i].ts, span), s.x(i, n), y1 + 18);
@@ -1823,9 +1943,8 @@ In `public/js/chart.js`, add `let hoverIndex = -1;` beside `let points = []`, an
       const what = fmtUsd(values[hoverIndex]);
       const boxW = Math.max(ctx.measureText(when).width, ctx.measureText(what).width) + 24;
       const boxH = 42;
-      // Flip to the left of the crosshair when the tooltip would overflow.
-      const bx = hx + 12 + boxW > x1 ? hx - 12 - boxW : hx + 12;
-      const by = Math.min(Math.max(hy - boxH / 2, y0), y1 - boxH);
+      // Placement is pure geometry, and lives in chart-math.js so it can be tested.
+      const { bx, by } = tooltipBox({ hx, hy, boxW, boxH, plot: s.plot });
       ctx.fillStyle = token('--surface-3', '#10151f');
       ctx.strokeStyle = token('--line', '#222b3d');
       ctx.lineWidth = 1;
@@ -1867,11 +1986,9 @@ Inside `createChart`, after `const onResize = …`:
     const px = e.clientX - rect.left;
     const st = canvas._scales;
     if (!st || st.n < 2) return;
-    const { x0, x1 } = st.s.plot;
-    if (px < x0 - 8 || px > x1 + 8) { if (hoverIndex !== -1) { hoverIndex = -1; draw(); } return; }
-    const frac = Math.min(1, Math.max(0, (px - x0) / (x1 - x0)));
-    const ts = points[0].ts + frac * st.span;
-    const idx = nearestIndex(points, ts);
+    // Hit-testing is pure geometry, and lives in chart-math.js so it can be tested;
+    // -1 means the pointer left the plot, which clears the crosshair.
+    const idx = pointerToIndex(px, st.s.plot, points, st.span);
     if (idx !== hoverIndex) { hoverIndex = idx; draw(); }
   }
   function onPointerLeave() { if (hoverIndex !== -1) { hoverIndex = -1; draw(); } }
