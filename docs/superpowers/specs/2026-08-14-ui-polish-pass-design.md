@@ -122,12 +122,21 @@ load-bearing rather than stylistic:
 | `mount(handlers)` | one-time wiring |
 | `reset()` | synchronous teardown to the empty state |
 
-`setX()` must stay synchronous because every panel's address is assigned in one
+Two rules follow from that table, and both are load-bearing:
+
+**`setX()` must stay synchronous**, because every panel's address is assigned in one
 block at the top of `selectAddress`. A setter that also fetches can only be
 awaited in the position its fetch belongs, which leaves that panel holding a
 stale address for the duration — and the export panel holding a stale address
 means the download button emits the previous wallet's CSV while the rest of the
 dashboard shows the new one.
+
+**Every `setX(address)` must be followed by its panel's loader** before the next
+await boundary settles. The loaders clear their own DOM before fetching, and they
+carry a generation guard so a superseded response cannot repaint. That is only
+safe because a setter is always paired with a loader: an unpaired `setAddress`
+leaves the panel cleared, never refilled, and still enabled — for the export
+panel that means a year-scoped download silently degrading to all-time.
 
 `chart.js` is the strictest boundary:
 

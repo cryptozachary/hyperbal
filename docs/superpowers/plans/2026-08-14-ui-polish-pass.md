@@ -1284,6 +1284,21 @@ if (r.truncated) {
 
 and replace `out.textContent = 'Sync failed: …'` with `toast('Sync failed: ' + e.message, 'error')`.
 
+**Two pre-existing export-panel defects to fix here**, surfaced during Task 3's
+review and deliberately left alone then because that task was under a
+zero-behavior-change contract:
+
+1. **A sync silently resets the selected period.** Select 2024, click Sync, click
+   Detailed CSV — you get 2026, because `loadPeriods` refills the picker and the
+   browser selects the first option. Capture `$('exportYear').value` before the
+   refill and restore it afterwards if that option still exists.
+2. **A failed `getRange` leaves the download buttons enabled**, so a year-scoped
+   export silently degrades to all-time. The existing comment claims "the
+   download buttons will report the error", but they don't — the download
+   succeeds with the wrong scope. Under the new error policy this is a
+   non-blocking failure: toast it, and disable the two download buttons until a
+   later `loadPeriods` succeeds.
+
 - [ ] **Step 5: Verify**
 
 Run: `npm start`
