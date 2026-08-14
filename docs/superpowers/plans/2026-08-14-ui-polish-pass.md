@@ -1991,7 +1991,10 @@ Inside `createChart`, after `const onResize = …`:
     if (!st || st.n < 2) return;
     // Hit-testing is pure geometry, and lives in chart-math.js so it can be tested;
     // -1 means the pointer left the plot, which clears the crosshair.
-    const idx = pointerToIndex(px, st.s.plot, points, st.span);
+    // Fourth argument is `slack`, NOT span. Passing a millisecond duration here
+    // makes the bounds check unsatisfiable, so the crosshair never clears when the
+    // pointer leaves horizontally. Omit it and take the 8px default.
+    const idx = pointerToIndex(px, st.s.plot, points);
     if (idx !== hoverIndex) { hoverIndex = idx; draw(); }
   }
   function onPointerLeave() { if (hoverIndex !== -1) { hoverIndex = -1; draw(); } }

@@ -276,11 +276,21 @@ zero as though it were an observation. Nulls become **gaps** in the line.
 
 ### Interaction
 
-Pointer events (so touch drag works). `nearestIndex` finds the snapshot by binary
-search on `ts`. Dashed vertical crosshair, marker dot on the line, and a tooltip
-showing exact value and timestamp. The tooltip flips to the left of the crosshair
-when it would overflow the right edge. `pointerleave` clears it. The last value
-stays pinned as a pill at the right edge.
+Pointer events (so touch drag works). Dashed vertical crosshair, marker dot on the
+line, and a tooltip showing exact value and timestamp. The tooltip flips to the
+left of the crosshair when it would overflow the right edge. `pointerleave` clears
+it. The last value stays pinned as a pill at the right edge.
+
+**Hit-testing inverts the index scale, not time.** `pointerToIndex` maps the
+pointer's x back through the same index-based mapping `computeScales.x` uses to
+place each point. An earlier draft searched for the nearest snapshot *by
+timestamp*, which is only equivalent when snapshots are evenly spaced in time —
+and they never are, since they accrue in dense bursts while the dashboard is open
+and not at all between sessions. Measured on a realistic series (four snapshots
+90s apart, a three-day gap, four more), that version returned the wrong point for
+**71% of pixels**: hovering a visible vertex described a point three positions
+away. `nearestIndex` remains in `chart-math.js` for `rangeChange` and is not part
+of the hover path.
 
 ### Range
 
