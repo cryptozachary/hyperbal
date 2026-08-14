@@ -1,9 +1,21 @@
 // The only file that knows route strings. Everything else asks by name.
 
+// Throws carry `status` (HTTP) or `offline` (never reached the server) so callers
+// can tell an incidental failure from one that leaves the page unusable.
 async function request(path, opts) {
-  const res = await fetch(path, opts);
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (err) {
+    err.offline = true;
+    throw err;
+  }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(body.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
   return body;
 }
 

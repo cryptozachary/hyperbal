@@ -138,7 +138,7 @@ function downloadExport(format) {
     params.set('to', String(to));
     params.set('label', sel);
   }
-  // Content-Disposition makes this a download rather than a navigation.
+  // Assigning window.location (not fetching) is what turns this into a download.
   window.location = api.exportUrl(state.address, params);
 }
 
