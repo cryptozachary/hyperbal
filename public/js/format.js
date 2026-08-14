@@ -40,6 +40,17 @@ export const cls = (n) => (n == null ? '' : n > 0 ? 'pos' : n < 0 ? 'neg' : '');
 
 export const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '');
 
+// Turns a chart-math `rangeChange()` result (or null, for < 2 points) into display
+// text + a sign class. Shared by the chart panel's readout and (per Task 10) the
+// card deltas, so the arrow/color tie-break at exactly zero and the pct===null
+// (zero-base) case only need fixing in one place.
+export function changeReadout(c, suffix) {
+  if (!c) return { text: `— over ${suffix}`, cls: '' };
+  const arrow = c.abs > 0 ? '▲' : c.abs < 0 ? '▼' : '·';
+  const pct = c.pct == null ? '' : ` · ${fmtPct(c.pct)}`;
+  return { text: `${arrow} ${fmtUsd(Math.abs(c.abs))}${pct} over ${suffix}`, cls: cls(c.abs) };
+}
+
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);

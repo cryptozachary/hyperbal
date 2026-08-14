@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtUsd, fmtNum, fmtPct, fmtCompact, fmtAxisTime, fmtTime, cls, short, esc } from '../public/js/format.js';
+import { fmtUsd, fmtNum, fmtPct, fmtCompact, fmtAxisTime, fmtTime, cls, short, esc, changeReadout } from '../public/js/format.js';
 
 test('fmtUsd handles sign, nulls and rounding', () => {
   assert.equal(fmtUsd(null), '—');
@@ -67,6 +67,18 @@ test('cls classifies sign', () => {
   assert.equal(cls(0), '');
   assert.equal(cls(1), 'pos');
   assert.equal(cls(-1), 'neg');
+});
+
+test('changeReadout handles null, positive, negative and a zero-base pct', () => {
+  assert.deepEqual(changeReadout(null, '24h'), { text: '— over 24h', cls: '' });
+  assert.deepEqual(changeReadout({ abs: 100, pct: 12.34 }, '7d'),
+    { text: '▲ $100 · +12.34% over 7d', cls: 'pos' });
+  assert.deepEqual(changeReadout({ abs: -50, pct: -5 }, '30d'),
+    { text: '▼ $50 · -5.00% over 30d', cls: 'neg' });
+  // abs === 0 uses the dot glyph, not an arrow, and carries no sign class — this is
+  // the tie-break that a naive `abs >= 0` arrow / three-way class would disagree on.
+  assert.deepEqual(changeReadout({ abs: 0, pct: null }, 'all time'),
+    { text: '· $0 over all time', cls: '' });
 });
 
 test('short and esc', () => {
