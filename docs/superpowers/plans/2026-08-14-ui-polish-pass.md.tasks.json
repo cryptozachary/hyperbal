@@ -11,7 +11,7 @@
     {
       "id": 2,
       "subject": "Task 2: Move app.js to public/js/ and extract api.js + chart.js",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Establish the module directory and pull out the two lowest-coupling concerns, with no behavior change.\n\n**Files:**\n- Create: public/js/api.js, public/js/chart.js, public/js/app.js\n- Delete: public/app.js\n- Modify: public/index.html:115\n\n**Verify:** `npm test`; `npm start` and walk the behavior checklist\n\n```json:metadata\n{\"files\": [\"public/js/api.js\", \"public/js/chart.js\", \"public/js/app.js\", \"public/index.html\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"public/app.js deleted, public/js/app.js is the entry point\", \"every route string lives in api.js\", \"chart drawing is out of app.js\", \"behavior identical\", \"npm test passes\"]}\n```"
     },

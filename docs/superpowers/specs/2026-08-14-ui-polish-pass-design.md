@@ -87,7 +87,9 @@ build step, no new dependency.
 |---|---|---|
 | `format.js` | `fmtUsd`, `fmtNum`, `fmtPct`, `fmtTime`, `fmtCompact`, `cls`, `short`, `esc` | nothing — pure, no DOM |
 | `api.js` | the `fetch` wrapper; one named function per route; the only file that knows route strings | nothing |
-| `chart.js` | canvas: scales, ticks, gridlines, area fill, crosshair hit-testing, tooltip, sparse-data notice, sparklines | `format.js` |
+| `chart-math.js` | pure geometry: ticks, scales, nearest-point, segments, range change | nothing — pure, no DOM |
+| `chart.js` | canvas painting: gridlines, area fill, line, crosshair, tooltip, sparse-data notice, sparklines | `format.js`, `chart-math.js` |
+| `chart-panel.js` | the chart's own state — history, series, range — plus its toggle and range wiring | `api.js`, `chart.js` |
 | `account.js` | summary cards and positions table | `format.js` |
 | `fills.js` | trade history table, filter, pager, live-append reload | `format.js`, `api.js` |
 | `wallets.js` | switcher popover: list, select, add, delete-with-confirm | `api.js`, `feedback.js` |
@@ -97,8 +99,35 @@ build step, no new dependency.
 
 ### Interfaces
 
-Each panel module exports `mount(root, handlers)` and `render(data)`. `app.js`
-never reaches into a panel's DOM; a panel never reads global state.
+`app.js` never reaches into a panel's DOM; a panel never reads global state, and
+**no panel imports `app.js`** — behavior arrives as injected handlers
+(`onSelect`, `onError`, `onEmpty`, `onSynced`). That last rule is what keeps the
+import graph a DAG; `app.js` ends in a bare `init()` call, so a cycle back into
+it would fail at module-evaluation time rather than degrade gracefully.
+
+Panels are mounted as `mount(handlers)` with no root element. A scoped root is
+not available: the panel `<section>`s in `index.html` carry no IDs, and
+`wallets.js` spans two disjoint regions of the document — the switcher in the
+header and the agents panel in `<main>` — so no single root can contain it.
+
+Method names follow one convention, and the distinction between the first two is
+load-bearing rather than stylistic:
+
+| Name | Contract |
+|---|---|
+| `paint()` | private, synchronous, DOM writes only |
+| `load()` | async — fetches, then paints |
+| `setX()` | synchronous assignment, **never fetches** |
+| `render(data)` | synchronous, paints from an argument |
+| `mount(handlers)` | one-time wiring |
+| `reset()` | synchronous teardown to the empty state |
+
+`setX()` must stay synchronous because every panel's address is assigned in one
+block at the top of `selectAddress`. A setter that also fetches can only be
+awaited in the position its fetch belongs, which leaves that panel holding a
+stale address for the duration — and the export panel holding a stale address
+means the download button emits the previous wallet's CSV while the rest of the
+dashboard shows the new one.
 
 `chart.js` is the strictest boundary:
 
@@ -263,6 +292,15 @@ genuinely thin.
   three-segment zigzag is not mistaken for a trend.
 
 Card sparklines reuse `chart.js`'s scale helpers rather than reimplementing them.
+
+**The sparklines need their own paint entry point.** `account.render(data)` takes
+the account payload, but sparklines read snapshot rows, which arrive from a
+different request that completes *after* the cards are painted — and on a wallet
+switch the history array is explicitly emptied first, so at `render` time there
+is nothing to draw from. `account.js` therefore exports a second, separate
+`renderSparks(points)`, called once the history load resolves. This keeps
+`render(data)` a pure function of its argument and avoids painting the cards
+twice per refresh.
 
 ---
 
