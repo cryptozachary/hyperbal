@@ -15,6 +15,22 @@ const state = {
 function showError(msg) { const e = $('error'); e.textContent = msg; e.classList.remove('hidden'); }
 function clearError() { $('error').classList.add('hidden'); }
 
+// The card sparklines/deltas need their own fixed 24h window — the chart panel's
+// `history` is range-scoped and reloads on every pill click, so wiring the cards
+// to it would make their "always 24h" guarantee depend on whatever range the
+// chart happens to be showing. Failures here are swallowed rather than routed to
+// showError: a stale sparkline is a minor cosmetic gap, not a reason to blank the
+// whole page the way a failed account fetch is.
+async function loadSparks() {
+  if (!state.address) return;
+  const forAddress = state.address;
+  try {
+    const { points } = await api.getHistory(state.address, Date.now() - 86400000);
+    if (state.address !== forAddress) return; // superseded by a wallet switch mid-flight
+    account.renderSparks(points);
+  } catch {}
+}
+
 async function refresh(showLoad = true) {
   if (!state.address) return;
   if (showLoad) setLoading(true);
@@ -23,6 +39,7 @@ async function refresh(showLoad = true) {
     clearError();
     account.render(data);
     await chartPanel.load();
+    await loadSparks();
     await fills.load();
   } catch (err) { showError(errMsg(err)); } // failing here leaves the page empty — inline region, not a toast
   finally { setLoading(false); }

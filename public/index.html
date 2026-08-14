@@ -22,10 +22,29 @@
   <main>
     <div id="walletBadge" class="wallet-badge hidden"></div>
     <section class="cards" id="cards">
-      <div class="card"><div class="card-label">Account Equity</div><div class="card-value" id="equity">—</div></div>
-      <div class="card"><div class="card-label">Unrealized PnL</div><div class="card-value" id="uPnl">—</div></div>
-      <div class="card"><div class="card-label">Realized PnL (cumulative)</div><div class="card-value" id="rPnl">—</div><div class="card-sub" id="rPnlRecent"></div></div>
-      <div class="card"><div class="card-label">Open Positions</div><div class="card-value" id="posCount">—</div></div>
+      <div class="card">
+        <div class="card-label">Account Equity</div>
+        <div class="card-value" id="equity">—</div>
+        <div class="card-sub" id="equityDelta"></div>
+        <canvas class="spark" id="equitySpark"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-label">Unrealized PnL</div>
+        <div class="card-value" id="uPnl">—</div>
+        <div class="card-sub" id="uPnlDelta"></div>
+        <canvas class="spark" id="uPnlSpark"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-label">Realized PnL (cumulative)</div>
+        <div class="card-value" id="rPnl">—</div>
+        <div class="card-sub" id="rPnlDelta"></div>
+        <canvas class="spark" id="rPnlSpark"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-label">Open Positions</div>
+        <div class="card-value" id="posCount">—</div>
+        <div class="card-sub" id="posSplit"></div>
+      </div>
     </section>
 
     <p class="dex-note">Totals are aggregated across all Hyperliquid perp dexs.</p>
