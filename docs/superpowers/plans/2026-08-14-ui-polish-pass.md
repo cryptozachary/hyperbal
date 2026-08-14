@@ -2615,6 +2615,11 @@ Run: `npm start` and confirm each:
 - [ ] Trade History paging, closes-only filter, and the page clamp (page to the end, then sync)
 - [ ] Adding a wallet, switching wallets, deleting a non-selected wallet, deleting the last wallet
 - [ ] Both CSV downloads fire; the period picker lists years
+- [ ] Click **Sync full history** twice, then open the period picker — the year
+      options must not duplicate (regression guard: `loadPeriods` clears the
+      picker itself, because `sync()` calls it without a preceding `setAddress`)
+- [ ] Switch wallets rapidly A→B→A, then open the period picker — it lists only
+      the current wallet's years, not both wallets' merged
 - [ ] A truncated sync leaves its message on screen; a complete sync toasts
 - [ ] Agent badge and Connected Agent Wallets panel render
 - [ ] Layout holds at 1440 / 768 / 375px with no horizontal page scroll

@@ -24,12 +24,22 @@ export function setAddress(next) {
   setEnabled(Boolean(address));
 }
 
-// Async: fetches the available years.
+let periodsSeq = 0;
+
+// Async: fetches the available years. Clears the picker itself rather than relying
+// on setAddress having just run — sync() calls this on its own, and appending to a
+// populated picker duplicates every option.
 export async function loadPeriods() {
   if (!address) return;
+  const seq = ++periodsSeq;
+  const want = address;
   const sel = $('exportYear');
+  sel.innerHTML = '';
   try {
-    const { minTs, maxTs } = await api.getRange(address);
+    const { minTs, maxTs } = await api.getRange(want);
+    // Two rapid wallet switches can leave an older request resolving last; whoever
+    // started most recently owns the picker.
+    if (seq !== periodsSeq || want !== address) return;
     const opts = [];
     if (minTs != null && maxTs != null) {
       const first = new Date(minTs).getFullYear();
