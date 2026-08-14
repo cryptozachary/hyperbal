@@ -1,4 +1,7 @@
-// Pure geometry for the chart. No DOM anywhere in this file — node:test imports it.
+// Pure geometry (and, below, axis formatting) for the chart. No DOM anywhere in this
+// file — node:test imports it.
+
+import { fmtUsd } from './format.js';
 
 // Round a raw step up to the nearest 1, 2 or 5 times a power of ten, so axis
 // labels land on numbers a human would have chosen.
@@ -35,6 +38,43 @@ export function niceTicks(min, max, target = 7) {
     ticks.push(rounded);
   }
   return ticks;
+}
+
+// Format a set of axis ticks (from niceTicks) so the whole column reads at one
+// precision. Precision is a property of the axis, not any single tick, so it's
+// derived once from the whole set rather than formatted per-value and repaired
+// after the fact — that per-value approach has two independent failure modes:
+// a narrow high range (equity near $2,008) collapses every tick to the same
+// abbreviation ("$2k" x5, telling the user nothing about a $400 move), and a
+// small range straddling a formatter's own rounding boundary mixes precisions
+// within one column ($2.00 next to $10, from PnL ticks 2/4/6/8/10). Both are
+// fixed the same way: pick one unit (none/k/M/B, from the largest tick's
+// magnitude) and the fewest decimals — 0, then 1 — that keep every formatted
+// tick distinct; if even one decimal can't tell them apart (e.g. a ~1% window
+// around $2,000, where the ticks differ by fractions of a percent of the
+// unit), fall back to full, un-abbreviated precision. Zero is always rendered
+// bare ("$0"), never "$0.0M" — it's unambiguous at any precision, and forcing
+// the unit's decimals onto it would be noise, not information.
+export function tickLabels(ticks) {
+  if (!ticks.length) return [];
+  const maxAbs = ticks.reduce((m, t) => Math.max(m, Math.abs(t)), 0);
+  const [unit, suffix] =
+    maxAbs >= 999.5e6 ? [1e9, 'B'] :
+    maxAbs >= 999.5e3 ? [1e6, 'M'] :
+    maxAbs >= 999.5 ? [1e3, 'k'] : [1, ''];
+
+  const format = (decimals) => ticks.map((t) => {
+    if (t === 0) return '$0';
+    const scaled = t / unit;
+    const sign = scaled < 0 ? '-' : '';
+    return `${sign}$${Math.abs(scaled).toFixed(decimals)}${suffix}`;
+  });
+
+  for (const decimals of [0, 1]) {
+    const labels = format(decimals);
+    if (new Set(labels).size === labels.length) return labels;
+  }
+  return ticks.map(fmtUsd);
 }
 
 // Maps series values into a plot box. `x` is index-based (snapshots are irregular

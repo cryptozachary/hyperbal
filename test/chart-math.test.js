@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  niceStep, niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  niceStep, niceTicks, tickLabels, computeScales, nearestIndex, segments, rangeChange,
   pickXLabels, pointerToIndex, tooltipBox,
 } from '../public/js/chart-math.js';
+import { fmtUsd } from '../public/js/format.js';
 
 test('niceStep snaps to 1/2/5 x 10^n', () => {
   assert.equal(niceStep(0.7), 1);
@@ -62,6 +63,77 @@ test('niceTicks handles sub-unit ranges', () => {
 test('niceTicks de-duplicates ticks toPrecision(12) collapses to the same value', () => {
   const t = niceTicks(5384.874180924359, 5384.874180932944);
   assert.equal(new Set(t).size, t.length, `duplicate tick in ${t}`);
+});
+
+// ---- tickLabels ----
+// Precision is a property of the whole axis, not any single tick, so these all
+// feed real niceTicks() output through tickLabels() rather than hand-picking
+// tick arrays — the two functions are meant to be used together.
+
+test('tickLabels normalizes a narrow high range to one shared decimal', () => {
+  // The live-app bug this fixes: equity ticks near $2,000 rendered as
+  // "$1.6k, $1.7k, $1.8k, $1.9k, $2k, $2.1k" — fmtCompact's trailing-.0 trim
+  // makes $2k read like a different, coarser precision than its neighbors.
+  const t = niceTicks(1600, 2100);
+  assert.deepEqual(tickLabels(t), ['$1.6k', '$1.7k', '$1.8k', '$1.9k', '$2.0k', '$2.1k']);
+});
+
+test('tickLabels keeps whole-number PnL ticks bare, not $2.00', () => {
+  // A second, independent case of the same root cause: fmtCompact's no-unit
+  // branch uses 2 decimals below $10 and 0 decimals at/above it, so ticks
+  // 0/2/4/6/8/10 mixed "$2.00" beside "$10" within one column.
+  const t = niceTicks(0, 10);
+  assert.deepEqual(tickLabels(t), ['$0', '$2', '$4', '$6', '$8', '$10']);
+});
+
+test('tickLabels handles a range spanning zero without a lone decimal', () => {
+  const t = niceTicks(-5, 20);
+  assert.deepEqual(tickLabels(t), ['-$5', '$0', '$5', '$10', '$15', '$20']);
+});
+
+test('tickLabels is uniform across a small positive range', () => {
+  const t = niceTicks(0, 25);
+  assert.deepEqual(tickLabels(t), ['$0', '$5', '$10', '$15', '$20', '$25']);
+});
+
+test('tickLabels picks one unit and one precision for a wide equity range', () => {
+  // 0 decimals would collide (0.5M and 1.0M both round to "1M"), so this must
+  // escalate to 1 decimal — and $0 still stays bare, not "$0.0M".
+  const t = niceTicks(0, 1.5e6);
+  assert.deepEqual(tickLabels(t), ['$0', '$0.5M', '$1.0M', '$1.5M']);
+});
+
+test('tickLabels falls back to full precision when even one decimal collides', () => {
+  // A ~1% window around $2,000: at 1 decimal every tick rounds to "$2.0k".
+  const t = niceTicks(1990, 2010);
+  const labels = tickLabels(t);
+  assert.deepEqual(labels, t.map(fmtUsd));
+  assert.equal(new Set(labels).size, labels.length, `duplicate in ${labels}`);
+});
+
+test('tickLabels needs no decimals when scaled ticks are already whole', () => {
+  const t = niceTicks(48000, 52000);
+  assert.deepEqual(tickLabels(t), ['$48k', '$49k', '$50k', '$51k', '$52k']);
+});
+
+test('tickLabels never returns two identical labels', () => {
+  const ranges = [[1600, 2100], [0, 10], [-5, 20], [0, 25], [0, 1.5e6], [1990, 2010], [48000, 52000]];
+  for (const [min, max] of ranges) {
+    const labels = tickLabels(niceTicks(min, max));
+    assert.equal(new Set(labels).size, labels.length, `duplicate for [${min}, ${max}]: ${labels}`);
+  }
+});
+
+test('tickLabels keeps one suffix and one decimal count across a unit-scaled set', () => {
+  // Every non-zero label in a unit-scaled column must share the suffix and the
+  // decimal count — that's the second bug (the first is the dedup check above).
+  const labels = tickLabels(niceTicks(0, 1.5e6)).filter((l) => l !== '$0');
+  assert.ok(labels.length > 0);
+  for (const l of labels) assert.match(l, /^\$\d+\.\dM$/, `inconsistent precision/suffix: ${l}`);
+});
+
+test('tickLabels returns nothing for an empty tick set', () => {
+  assert.deepEqual(tickLabels([]), []);
 });
 
 const BOX = { width: 600, height: 200, padLeft: 52, padRight: 12, padTop: 20, padBottom: 28 };

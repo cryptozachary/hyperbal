@@ -3,15 +3,15 @@
 // side: it reads CSS custom properties at module scope, which is why chart-math.js
 // can't just be inlined here and tested directly.
 
-import { fmtCompact, fmtUsd, fmtAxisTime } from './format.js';
+import { fmtUsd, fmtAxisTime } from './format.js';
 import {
-  niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  niceTicks, tickLabels, computeScales, nearestIndex, segments, rangeChange,
   pickXLabels, pointerToIndex, tooltipBox,
 } from './chart-math.js';
 
 // Re-exported so consumers have one import for chart concerns.
 export {
-  niceTicks, computeScales, nearestIndex, segments, rangeChange,
+  niceTicks, tickLabels, computeScales, nearestIndex, segments, rangeChange,
   pickXLabels, pointerToIndex, tooltipBox,
 };
 
@@ -29,23 +29,6 @@ const COLORS = {
 const PAD = { padLeft: 52, padRight: 14, padTop: 18, padBottom: 26 };
 
 const valueOf = (p, series) => (series === 'equity' ? p.equity : p.unrealized_pnl);
-
-// fmtCompact is lossy above $999.50, so a narrow range (e.g. equity sitting near
-// $2,008 with $10 of noise) collapses every tick to the same string — "$2k" five
-// times tells the user nothing about a $400 move. Fall back to full precision for
-// the whole axis when abbreviating would repeat a label; which formatter to use is
-// the chart's call, not chart-math's, so this lives here rather than in niceTicks.
-function tickLabels(ticks) {
-  const compact = ticks.map(fmtCompact);
-  if (new Set(compact).size !== compact.length) return ticks.map(fmtUsd);
-  // fmtCompact's trimUnit strips a trailing ".0" — correct for a single value, wrong
-  // for a column, where e.g. $1800/$1900/$2000/$2100 renders as "$1.8k, $1.9k, $2k,
-  // $2.1k". If any label in the set kept a decimal, force the whole set to one
-  // decimal place so the column shares a single precision. fmtCompact itself is
-  // left alone — other callers want the trimmed form.
-  if (!compact.some((l) => /\.\d/.test(l))) return compact;
-  return compact.map((l) => l.replace(/^([-]?\$)(\d+)([kMB])$/, '$1$2.0$3'));
-}
 
 // The series being empty and there being no snapshots at all are different facts,
 // and conflating them tells a user with a year of equity history to "wait for data"
@@ -78,6 +61,11 @@ export function createChart(canvas) {
   let hoverIndex = -1;
 
   function draw() {
+    // Cleared unconditionally, before the layout guard below can return early, so
+    // the pointer handler can never hit-test against scales left over from a
+    // previous, differently-shaped (or now off-screen) render.
+    if (canvas) canvas._scales = null;
+
     // An unlaid-out canvas (0 width/height — e.g. mid wallet-switch, or before the
     // panel has been given layout) would otherwise compute negative coordinates and
     // silently paint nothing. Bail rather than draw an invisible chart.
@@ -93,9 +81,6 @@ export function createChart(canvas) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.font = '10px system-ui, sans-serif';
-    // Cleared up front so the pointer handler added in Task 8 can never hit-test
-    // against scales left over from a previous, differently-shaped render.
-    canvas._scales = null;
 
     const values = points.map((p) => valueOf(p, opts.series));
     const drawable = values.filter((v) => v != null && Number.isFinite(v));
@@ -198,7 +183,9 @@ export function createChart(canvas) {
     const pillText = fmtUsd(lastVal);
     const pillW = ctx.measureText(pillText).width + 16;
     const pillH = 20;
-    const pillX = x1 - pillW;
+    // Clamped against x0 too: a seven-figure balance on a narrow panel would
+    // otherwise push the pill's left edge past the plot and over the y-axis labels.
+    const pillX = Math.max(x0, x1 - pillW);
     const pillY = Math.min(Math.max(s.y(lastVal) - 10, y0), y1 - pillH);
 
     // --- crosshair + tooltip geometry ---
@@ -209,7 +196,15 @@ export function createChart(canvas) {
         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
       });
       const what = fmtUsd(values[hoverIndex]);
-      const boxW = Math.max(ctx.measureText(when).width, ctx.measureText(what).width) + 24;
+      // `what` is painted bold at 13px below, not at the ambient 10px font — measure
+      // each string in the font it's actually painted in, or a long value overhangs
+      // the rounded border by however much bold-13px is wider than the estimate, and
+      // pillHidden (below) under-detects the very overlap it exists to catch.
+      const whenW = ctx.measureText(when).width;
+      ctx.font = '600 13px system-ui, sans-serif';
+      const whatW = ctx.measureText(what).width;
+      ctx.font = '10px system-ui, sans-serif';
+      const boxW = Math.max(whenW, whatW) + 24;
       const boxH = 42;
       // Placement is pure geometry, and lives in chart-math.js so it can be tested.
       const { bx, by } = tooltipBox({ hx, hy, boxW, boxH, plot: s.plot });
@@ -218,16 +213,19 @@ export function createChart(canvas) {
 
     // The pill and the flipped tooltip both live at the right edge, so hovering
     // near the last point can land one on top of the other. The tooltip paints
-    // opaque, so an unconditional draw order would leave the pill looking cut
-    // off; skip the pill outright when their boxes overlap — the tooltip already
-    // shows the same value with more precision.
+    // opaque, so an unconditional draw order would leave the pill looking cut off.
+    // The tooltip only reaches the pill's rectangle near the right edge in the
+    // first place, so skip the pill outright when the boxes overlap — two
+    // overlapping boxes read worse than one, even though the tooltip is usually
+    // describing a different point than the pill's pinned last value.
     const pillHidden = hover
       && hover.bx < pillX + pillW && hover.bx + hover.boxW > pillX
       && hover.by < pillY + pillH && hover.by + hover.boxH > pillY;
 
     if (!pillHidden) {
       ctx.fillStyle = hexA(stroke, 0.12);
-      ctx.strokeStyle = hexA(stroke, 0.45);
+      ctx.strokeStyle = hexA(stroke, 0.4);
+      ctx.lineWidth = 1;
       roundRect(ctx, pillX, pillY, pillW, pillH, 10);
       ctx.fill(); ctx.stroke();
       ctx.fillStyle = stroke;
@@ -238,8 +236,11 @@ export function createChart(canvas) {
 
     if (hover) {
       const { hx, hy, when, what, bx, by, boxW, boxH } = hover;
-      // save/restore scopes the dash so it can't leak into the next frame's
-      // gridlines or line stroke.
+      // save/restore scopes the dash to just this line. canvas.width resets the
+      // entire context every frame, so a leaked dash can't survive to the *next*
+      // frame regardless — but without restore() here, it would still be active
+      // for the dot marker and tooltip box drawn right after, in this same frame,
+      // making their outlines dashed too.
       ctx.save();
       ctx.strokeStyle = token('--accent', '#6c8cff');
       ctx.setLineDash([3, 3]);
@@ -265,7 +266,9 @@ export function createChart(canvas) {
       ctx.font = '10px system-ui, sans-serif';
     }
 
-    canvas._scales = { s, n, span, values };
+    // `span` isn't kept here: it was only ever for pointerToIndex's now-removed
+    // fourth argument, and nothing reads it off canvas._scales.
+    canvas._scales = { s, n, values };
   }
 
   // Canvas colors need rgba; the tokens are hex.
@@ -307,31 +310,50 @@ export function createChart(canvas) {
     if (resizeFrame != null) return;
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = null;
+      // The plot geometry just moved but no pointermove fired to relocate the
+      // crosshair against it, so a stale hoverIndex would draw pinned to wherever
+      // the old geometry put it. render() already does this on a data change;
+      // a resize is the same kind of "the pointer's context went stale" event.
+      hoverIndex = -1;
       safeDraw();
     });
   };
   window.addEventListener('resize', onResize);
 
   // Pointer events rather than mouse events, so a touch drag scrubs the chart.
+  // Coalesced through rAF for the same reason resize is: draw() reassigns
+  // canvas.width every call, which reallocates the backing store, and once a
+  // series is dense enough that every pixel of pointer travel resolves to a
+  // different index, an uncoalesced redraw-per-pointermove reallocates on every
+  // pixel — exactly when the guard below (skip unless the index changed) stops
+  // helping.
+  let hoverFrame = null;
+  function scheduleHoverDraw() {
+    if (hoverFrame != null) return;
+    hoverFrame = requestAnimationFrame(() => {
+      hoverFrame = null;
+      // Route through safeDraw, not draw(), so a throw triggered while hovering
+      // gets the same fallback the initial render and resize paths get.
+      safeDraw();
+    });
+  }
   function onPointerMove(e) {
-    const rect = canvas.getBoundingClientRect();
-    const px = e.clientX - rect.left;
+    // offsetX is already relative to the target's padding box; clientX would need
+    // getBoundingClientRect() to convert, which forces a synchronous layout flush
+    // on every pointer event.
+    const px = e.offsetX;
     const st = canvas._scales;
-    // _scales is cleared at the top of every draw() and only reassigned at the
-    // end, so a caught mid-draw throw (see safeDraw) leaves it null here.
+    // _scales is cleared at the top of every draw() (even before its own layout
+    // guard can return early) and only reassigned at the end, so a caught
+    // mid-draw throw (see safeDraw) leaves it null here.
     if (!st || st.n < 2) return;
     // Hit-testing is pure geometry, and lives in chart-math.js so it can be
     // tested; -1 means the pointer left the plot, which clears the crosshair.
     const idx = pointerToIndex(px, st.s.plot, points);
-    if (idx !== hoverIndex) {
-      hoverIndex = idx;
-      // Route through safeDraw, not draw(), so a throw triggered while hovering
-      // gets the same fallback the initial render and resize paths get.
-      safeDraw();
-    }
+    if (idx !== hoverIndex) { hoverIndex = idx; scheduleHoverDraw(); }
   }
   function onPointerLeave() {
-    if (hoverIndex !== -1) { hoverIndex = -1; safeDraw(); }
+    if (hoverIndex !== -1) { hoverIndex = -1; scheduleHoverDraw(); }
   }
 
   canvas.addEventListener('pointermove', onPointerMove);
@@ -349,7 +371,9 @@ export function createChart(canvas) {
       window.removeEventListener('resize', onResize);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerleave', onPointerLeave);
+      canvas.style.touchAction = '';
       if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
+      if (hoverFrame != null) cancelAnimationFrame(hoverFrame);
     },
   };
 }
