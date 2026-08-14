@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import * as api from '../public/js/api.js';
 
 // Swap globalThis.fetch for the duration of one call and capture what was requested.
+// Relies on node:test running top-level tests sequentially — do NOT add
+// { concurrency: true } to this file, or the swaps race and clobber each other.
 async function withFetch(impl, run) {
   const original = globalThis.fetch;
   const calls = [];

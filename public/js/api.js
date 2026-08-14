@@ -7,7 +7,9 @@ async function request(path, opts) {
   try {
     res = await fetch(path, opts);
   } catch (err) {
-    err.offline = true;
+    // An abort is caller-initiated and may well have reached the server, so it is
+    // deliberately left unclassified — the caller already knows why it stopped.
+    if (err.name !== 'AbortError') err.offline = true;
     throw err;
   }
   const body = await res.json().catch(() => ({}));
