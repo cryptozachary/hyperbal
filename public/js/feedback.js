@@ -18,6 +18,11 @@ export function errMsg(err) {
 
 export function toast(message, kind = 'info') {
   const host = $('toasts');
+  // Suppress an exact duplicate that's already showing — otherwise a persistently
+  // failing 30s poll would stack an unlabeled toast every cycle, forever.
+  const alreadyShowing = Array.from(host.children)
+    .some((el) => !el.classList.contains('leaving') && el.textContent === message);
+  if (alreadyShowing) return;
   const el = document.createElement('div');
   el.className = `toast toast-${kind}`;
   el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
@@ -56,15 +61,21 @@ export function skeletonRows(tbody, cols, n = 6) {
 let openDialog = null;
 
 export function confirmDialog({ title, body, confirmLabel = 'Delete' }) {
+  // Captured before closing any dialog already open: that close() restores focus to
+  // whatever triggered IT, and by the time the Promise executor below would read
+  // document.activeElement it'd get that fallback instead of this call's real trigger.
+  const previouslyFocused = document.activeElement;
   if (openDialog) openDialog(false);
   return new Promise((resolve) => {
     const root = $('modalRoot');
-    const previouslyFocused = document.activeElement;
-    // #modalRoot is a direct child of <body> (see index.html) specifically so it can
-    // be excluded here — everything else on the page is made inert while the dialog
-    // is open, so a stray click or programmatic focus can't reach it even outside
-    // the Tab-key trap below.
-    const inertSiblings = Array.from(document.body.children).filter((el) => el !== root);
+    // #toasts and #modalRoot are both direct children of <body> (see index.html)
+    // specifically so they can be excluded here — everything else on the page is
+    // made inert while the dialog is open, so a stray click or programmatic focus
+    // can't reach it even outside the Tab-key trap below. #toasts stays live too:
+    // a toast raised while the dialog is open is the only way an error reaches the
+    // user, so it must stay clickable, focusable, and in the accessibility tree.
+    const overlays = [root, $('toasts')];
+    const inertSiblings = Array.from(document.body.children).filter((el) => !overlays.includes(el));
     for (const el of inertSiblings) el.inert = true;
     root.innerHTML = `
       <div class="modal-backdrop">

@@ -45,13 +45,21 @@ function paint() {
 // routing through paint(). A failure with real rows already on screen leaves them
 // alone; the toast is the only signal.
 function errorRow(tbody) {
+  $('fillsEmpty').classList.add('hidden'); // neither a skeleton nor an error row is "empty"
   tbody.innerHTML = '<tr><td colspan="7" class="empty">Couldn\'t load trade history.</td></tr>';
 }
 
 export async function load(retried = false) {
   if (!address) { view.rows = []; view.total = 0; paint(); return; }
   const showedSkeleton = view.rows.length === 0;
-  if (showedSkeleton) skeletonRows($('fills').querySelector('tbody'), 7);
+  if (showedSkeleton) {
+    // paint() is the only thing that shows #fillsEmpty, but it's a sibling div that
+    // neither skeletonRows() nor errorRow() routes through — left un-hidden from a
+    // prior empty state, it would sit underneath the skeleton (or the error row)
+    // claiming "No trades recorded" while we don't actually know that yet.
+    $('fillsEmpty').classList.add('hidden');
+    skeletonRows($('fills').querySelector('tbody'), 7);
+  }
   try {
     const data = await api.getFills(address, view);
     // The page can fall off the end of the data (a purge elsewhere, another tab,
@@ -66,7 +74,7 @@ export async function load(retried = false) {
     paint();
   } catch (err) {
     if (showedSkeleton) errorRow($('fills').querySelector('tbody'));
-    toast(errMsg(err), 'error');
+    toast("Couldn't load trade history: " + errMsg(err), 'error');
   }
 }
 
