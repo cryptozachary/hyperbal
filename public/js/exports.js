@@ -14,7 +14,7 @@ function yearBounds(year) {
 }
 
 function setEnabled(on) {
-  for (const id of ['exportYear', 'exportDetailedBtn', 'exportKoinlyBtn', 'syncBtn']) $(id).disabled = !on;
+  for (const id of ['exportYear', 'exportDetailedBtn', 'exportKoinlyBtn', 'syncBtn', 'fillsSyncBtn']) $(id).disabled = !on;
 }
 
 // Synchronous: must land in the same block as the other panels' address
@@ -95,10 +95,14 @@ function download(format) {
   window.location = api.exportUrl(address, params);
 }
 
-async function sync() {
+export async function sync() {
   if (!address) return;
   const out = $('syncResult');
+  // Two entry points (the Export panel and the Trade History empty state) call the
+  // same in-flight sync — disable both so a click on one can't fire a second,
+  // overlapping backfill while the first is still running.
   $('syncBtn').disabled = true;
+  $('fillsSyncBtn').disabled = true;
   // A failure now toasts instead of overwriting this line — save what was here
   // (e.g. a still-valid truncated-sync note) so a failed attempt can restore it
   // instead of leaving "Syncing…" stuck on screen.
@@ -142,6 +146,7 @@ async function sync() {
     toast('Sync failed: ' + errMsg(e), 'error');
   } finally {
     $('syncBtn').disabled = false;
+    $('fillsSyncBtn').disabled = false;
   }
 }
 
@@ -157,4 +162,9 @@ export function mount(handlers) {
   $('exportDetailedBtn').addEventListener('click', () => download('detailed'));
   $('exportKoinlyBtn').addEventListener('click', () => download('koinly'));
   $('syncBtn').addEventListener('click', sync);
+  // Trade History's empty state offers the same sync rather than duplicating its
+  // logic — same disable-while-running, resume-cursor and toast behavior as the
+  // Export panel's button, just reachable from where a wallet with no fills yet
+  // actually is.
+  $('fillsSyncBtn').addEventListener('click', sync);
 }

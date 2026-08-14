@@ -11,15 +11,36 @@ let reloadTimer = null;
 // Pre-migration rows have no dir; fall back to the raw HL side (B = bid/buy, A = ask/sell).
 const dirText = (f) => f.dir || (f.side === 'B' ? 'Buy' : f.side === 'A' ? 'Sell' : '—');
 
+// Color by whether the fill actually bought or sold, not by parsing the label text.
+// `dir` is HL's human phrasing and it is not safe to pattern-match: "Close Short" is
+// a BUY (buying back to close a short) even though the text contains neither "buy"
+// nor is that obvious from a quick regex, and HL also emits flip phrasings like
+// "Long > Short" that don't fit an Open/Close vocabulary at all. `side` ('B' = bid =
+// buy, 'A' = ask = sell) is the authoritative raw flag for every fill regardless of
+// how `dir` reads, so it — not the text — decides the chip color.
+function dirChip(f) {
+  const text = dirText(f);
+  const kind = f.side === 'B' ? 'buy' : f.side === 'A' ? 'sell' : 'flat';
+  return `<span class="chip chip-${kind}">${esc(text)}</span>`;
+}
+
 function rowHtml(f) {
   return `
     <td>${fmtTime(f.ts)}</td>
-    <td>${esc(f.coin ?? '—')}</td>
-    <td>${esc(dirText(f))}</td>
+    <td><span class="coin">${esc(f.coin ?? '—')}</span></td>
+    <td>${dirChip(f)}</td>
     <td>${fmtNum(f.sz)}</td>
     <td>${fmtNum(f.px, 2)}</td>
     <td>${fmtUsd(f.fee)}</td>
     <td class="${cls(f.closed_pnl)}">${f.closed_pnl ? fmtUsd(f.closed_pnl) : '—'}</td>`;
+}
+
+// The single place that reflects `view` (the committed state) into the DOM — the
+// filter buttons' active class included, so a click only moves the highlight once
+// its fetch has actually landed and view.closesOnly has been committed to match.
+function syncFilterButtons() {
+  $('fillsAllBtn').classList.toggle('active', !view.closesOnly);
+  $('fillsClosesBtn').classList.toggle('active', view.closesOnly);
 }
 
 function paint() {
@@ -36,6 +57,7 @@ function paint() {
   $('fillsRange').textContent = view.total === 0 ? '—' : `${first}–${last} of ${view.total}`;
   $('fillsPrev').disabled = view.offset === 0;
   $('fillsNext').disabled = view.offset + view.limit >= view.total;
+  syncFilterButtons();
 }
 
 // A failed fetch when we had nothing on screen yet (skeleton rows showing) must not
@@ -49,8 +71,17 @@ function errorRow(tbody) {
   tbody.innerHTML = '<tr><td colspan="7" class="empty">Couldn\'t load trade history.</td></tr>';
 }
 
-export async function load(retried = false) {
+// `pending` carries an in-flight offset/closesOnly that hasn't been committed to
+// `view` yet. A failing fetch must leave the page exactly as it was — rows, range
+// label, and the filter highlight all still describing the last successful load —
+// so fillsNext/fillsPrev/the filter buttons pass their candidate values in here
+// rather than writing them onto `view` up front. Only a successful fetch commits
+// them (see below); a rejected one leaves `view` (and everything paint() reflects)
+// untouched, with the toast as the only signal.
+export async function load(retried = false, pending = {}) {
   if (!address) { view.rows = []; view.total = 0; paint(); return; }
+  const offset = 'offset' in pending ? pending.offset : view.offset;
+  const closesOnly = 'closesOnly' in pending ? pending.closesOnly : view.closesOnly;
   const showedSkeleton = view.rows.length === 0;
   if (showedSkeleton) {
     // paint() is the only thing that shows #fillsEmpty, but it's a sibling div that
@@ -61,14 +92,19 @@ export async function load(retried = false) {
     skeletonRows($('fills').querySelector('tbody'), 7);
   }
   try {
-    const data = await api.getFills(address, view);
+    const data = await api.getFills(address, { limit: view.limit, offset, closesOnly });
     // The page can fall off the end of the data (a purge elsewhere, another tab,
     // a server restart). Clamp back to the last real page instead of rendering an
     // empty table under a "401–300 of 300" range.
-    if (!retried && !data.fills.length && data.total > 0 && view.offset > 0) {
-      view.offset = Math.max(0, (Math.ceil(data.total / view.limit) - 1) * view.limit);
-      return load(true);
+    if (!retried && !data.fills.length && data.total > 0 && offset > 0) {
+      const clamped = Math.max(0, (Math.ceil(data.total / view.limit) - 1) * view.limit);
+      return load(true, { offset: clamped, closesOnly });
     }
+    // Commit the candidate offset/closesOnly only now that the fetch that used them
+    // has actually succeeded — a failed click must not advance the page or move the
+    // filter highlight while the rows underneath stay on the old page.
+    view.offset = offset;
+    view.closesOnly = closesOnly;
     view.rows = data.fills;
     view.total = data.total;
     paint();
@@ -101,27 +137,21 @@ export function reset() {
   address = null;
   Object.assign(view, { rows: [], total: 0, limit: 50, offset: 0, closesOnly: false });
   clearTimeout(reloadTimer); reloadTimer = null;
-  // Keep the filter buttons in sync with the closesOnly reset above.
-  $('fillsClosesBtn').classList.remove('active');
-  $('fillsAllBtn').classList.add('active');
-  paint();
+  paint(); // also re-syncs the filter buttons from the closesOnly reset above
 }
 
 export function mount() {
-  const setFilter = (closesOnly, activeBtn) => {
-    document.querySelectorAll('#fillsAllBtn, #fillsClosesBtn').forEach((b) => b.classList.remove('active'));
-    activeBtn.classList.add('active');
-    view.closesOnly = closesOnly;
-    view.offset = 0;
-    load();
+  const setFilter = (closesOnly) => {
+    if (closesOnly === view.closesOnly) return; // already the active filter
+    load(false, { offset: 0, closesOnly });
   };
-  $('fillsAllBtn').addEventListener('click', (e) => setFilter(false, e.currentTarget));
-  $('fillsClosesBtn').addEventListener('click', (e) => setFilter(true, e.currentTarget));
+  $('fillsAllBtn').addEventListener('click', () => setFilter(false));
+  $('fillsClosesBtn').addEventListener('click', () => setFilter(true));
   $('fillsPrev').addEventListener('click', () => {
-    view.offset = Math.max(0, view.offset - view.limit);
-    load();
+    if (view.offset === 0) return;
+    load(false, { offset: Math.max(0, view.offset - view.limit) });
   });
   $('fillsNext').addEventListener('click', () => {
-    if (view.offset + view.limit < view.total) { view.offset += view.limit; load(); }
+    if (view.offset + view.limit < view.total) load(false, { offset: view.offset + view.limit });
   });
 }

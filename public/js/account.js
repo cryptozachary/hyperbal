@@ -35,8 +35,8 @@ export function render(d) {
   for (const p of positions) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${esc(p.coin ?? '—')}${p.collateral ? ` · ${esc(p.collateral)}` : ''}</td>
-      <td class="${p.side === 'LONG' ? 'side-long' : 'side-short'}">${p.side ?? '—'}</td>
+      <td><span class="coin">${esc(p.coin ?? '—')}</span>${p.collateral ? `<span class="coin-dex"> · ${esc(p.collateral)}</span>` : ''}</td>
+      <td><span class="chip ${p.side === 'LONG' ? 'chip-long' : p.side === 'SHORT' ? 'chip-short' : 'chip-flat'}">${p.side ?? '—'}</span></td>
       <td>${fmtNum(p.size)}</td>
       <td>${fmtNum(p.entryPrice, 2)}</td>
       <td>${fmtNum(p.markPrice, 2)}</td>
