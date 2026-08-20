@@ -157,8 +157,9 @@ npm test
 ```
 
 Runs the unit tests (config, DB layer, normalizers/validation, account assembly,
-the WebSocket stream, CSV export, plus the frontend formatters and chart
-geometry) via Node's built-in test runner.
+the WebSocket stream, CSV export, the alert evaluator, runner, and email
+notifier, plus the frontend formatters and chart geometry) via Node's built-in
+test runner. No test opens a socket or sends mail.
 
 ### Manual verification checklist
 
@@ -284,7 +285,8 @@ All public, read-only:
   USDT-margined pairs in some wallets' "Perps" tabs (Bitget's own engine) — are a
   different venue and cannot appear here.
 - **Deleting a wallet erases its stored data.** Removing a wallet purges its
-  observed fills, funding, and equity snapshots along with the wallet entry.
+  observed fills, funding, equity snapshots, and alert rules along with the
+  wallet entry.
   Re-adding it and running **Sync full history** recovers whatever Hyperliquid
   still serves, but equity snapshots are gone for good (they're a local
   observation, not something Hyperliquid replays), and any fills or funding that
@@ -333,8 +335,15 @@ All public, read-only:
   phrase — no part of this app asks for one, and you should never give one to any
   dashboard.
 - The only data written is to your **own local SQLite file** (watched wallets,
-  equity snapshots, observed fills). `.env`, `node_modules/`, and `data/` are
-  gitignored.
+  equity snapshots, observed fills, alert rules). `.env`, `node_modules/`, and
+  `data/` are gitignored.
+- **Configuring alert email is the one thing that sends your data off the
+  machine.** With SMTP set up, a firing alert transmits the rule, the observed
+  value, and a one-line account or position summary — equity, unrealized PnL,
+  entry, mark, and liquidation price — through your SMTP provider to
+  `ALERT_EMAIL_TO`, in plain text. Nothing is sent anywhere until you set
+  `SMTP_HOST` and `ALERT_EMAIL_TO`, and the credentials live only in your
+  gitignored `.env`. Use a provider you trust with that.
 
 ## Project structure
 
