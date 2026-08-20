@@ -56,6 +56,10 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
   `userFillsByTime` and `userFunding`, filling in direction, builder fees, and
   transaction hashes on rows recorded before those were captured. Idempotent —
   safe to re-run.
+- **Account alerts by email.** Threshold rules over account and position metrics —
+  equity, unrealized PnL, mark price, ROE, leverage, and distance to liquidation.
+  Evaluated on the server whether or not a browser is open, emailed once per
+  crossing, and automatically re-armed when the condition goes false.
 - Shimmer loading skeletons, toasts for non-blocking failures, a focus-trapped
   confirm dialog (no `window.confirm()`), and a persistent inline error region
   for failures that leave the page unusable. Positive/negative PnL coloring.
@@ -67,7 +71,8 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
 
 Vanilla HTML/CSS/JS frontend, split into native ES modules with no build step
 (no frameworks, no bundler, no chart library). Node.js + Express backend.
-`better-sqlite3` for persistence, `ws` for WebSockets, `dotenv` for config.
+`better-sqlite3` for persistence, `ws` for WebSockets, `dotenv` for config,
+`nodemailer` for alert email.
 
 ## Requirements
 
@@ -109,6 +114,31 @@ You can set the wallet **two ways** (no address is hardcoded anywhere):
 
 To point at **testnet**, set `HL_API_URL=https://api.hyperliquid-testnet.xyz/info`
 and `HL_WS_URL=wss://api.hyperliquid-testnet.xyz/ws`.
+
+### Alerts and email
+
+All of these are optional. With `SMTP_HOST` or `ALERT_EMAIL_TO` unset, alerts still
+evaluate and log — they simply are not emailed, and the dashboard says so.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SMTP_HOST` | *(empty)* | SMTP server hostname. |
+| `SMTP_PORT` | `587` | SMTP port. `465` uses implicit TLS; anything else uses STARTTLS. |
+| `SMTP_USER` | *(empty)* | SMTP username. Omit for a relay that needs no auth. |
+| `SMTP_PASS` | *(empty)* | SMTP password or app password. |
+| `SMTP_FROM` | `SMTP_USER` | Envelope From address. |
+| `ALERT_EMAIL_TO` | *(empty)* | Where alerts are delivered. |
+| `ALERT_COOLDOWN_MS` | `900000` | Quiet period between sends for one rule (15 min). |
+| `ALERT_POLL_INTERVAL_MS` | `300000` | Backstop sweep, in case the websocket stalls (5 min). |
+| `ALERT_DEBOUNCE_MS` | `5000` | Debounce on websocket-triggered evaluations. |
+| `DASHBOARD_URL` | `http://localhost:$PORT` | Link target in the alert email. |
+
+For Gmail, use an [app password](https://support.google.com/accounts/answer/185833)
+with `SMTP_HOST=smtp.gmail.com` and `SMTP_PORT=587` — a normal account password will
+be rejected. `.env` is gitignored, so credentials stay out of the repository.
+
+Use **Send test email** in the Alerts panel to confirm the settings before relying
+on them.
 
 ## Run
 
@@ -167,6 +197,17 @@ focus behavior. Run `npm start` and check these by hand after any UI change:
 - Sticky table headers keep a visible bottom border while the table scrolls
   under them (the tables use `border-collapse:collapse`, which can drop a
   sticky header's border — this one can only be checked in a browser).
+
+#### Alerts
+
+- With no SMTP configured, the panel shows the "Email is not configured" banner
+  and the test button is disabled.
+- With SMTP configured, **Send test email** delivers a message.
+- Adding an account rule that is already true delivers one email within about a
+  minute, and does not deliver a second on the next tick.
+- Pausing a rule stops it firing; resuming re-arms it.
+- Deleting the wallet removes its alerts.
+- Stopping and restarting the server keeps the rules and keeps them firing.
 
 ## Hyperliquid endpoints used
 
@@ -267,6 +308,21 @@ All public, read-only:
 - **Funding rows carry no explorer link.** Funding settles as an internal ledger
   event rather than an on-chain transaction, so Hyperliquid reports a zero-filled
   hash for it. Trade rows all carry a working link.
+- **Alerts are triggered by the main-dex feed.** The `webData2` subscription that
+  wakes the evaluator carries main-dex state only, so a change confined to a builder
+  dex may not trigger an immediate evaluation. The values compared are always the
+  full aggregated ones — the evaluator re-fetches across every dex before deciding —
+  and the 5-minute backstop sweep catches anything the trigger missed.
+- **One recipient, one cooldown.** `ALERT_EMAIL_TO` is global and so is
+  `ALERT_COOLDOWN_MS`; there are no per-rule overrides.
+- **A rule fires once per crossing.** It re-arms when the condition goes false. If
+  the condition is true continuously for a week, that is one email, not a reminder
+  stream.
+- **No firing history.** Each rule records only when it last fired, not a log of
+  every firing.
+- **Alerts are not a stop-loss.** They are a notification about data this dashboard
+  observed; delivery is best-effort and the app is read-only. Never rely on one to
+  manage risk on its own.
 - Single-user, no authentication — intended to run locally on your own machine.
 
 ## Security
@@ -292,6 +348,10 @@ backfill.js        Paginated history sync (fills + funding) from Hyperliquid
 export.js          CSV generation: detailed and Koinly row builders
 hl-stream.js       Upstream WebSocket client to Hyperliquid
 ws-server.js       Browser-facing WebSocket hub (/ws)
+alerts.js          Pure alert logic: metric whitelist, resolution, fire/no-fire
+alert-runner.js    Subscribes to the account stream, debounces, evaluates rules,
+                   sends, and persists the outcome
+notifier.js        Email transport: SMTP via nodemailer, or a logging no-op
 public/
   index.html       Dashboard markup
   styles.css       Dark theme + design tokens
@@ -307,6 +367,7 @@ public/
     wallets.js     Wallet switcher popover
     exports.js     Export panel + history sync
     feedback.js    Toasts, skeletons, confirm dialog
+    alerts.js      Alerts panel: rule list, add/pause/delete, send test email
 test/              Unit tests (node:test)
 data/              SQLite DB (created at runtime, gitignored)
 ```
