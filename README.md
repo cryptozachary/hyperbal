@@ -13,7 +13,7 @@ over WebSocket, with a local SQLite store for history and cumulative realized Pn
 
 ## Features
 
-- **Live updates** via Hyperliquid's public WebSocket (`webData2` + `userFills`),
+- **Live updates** via Hyperliquid's public WebSocket (`allMids` + `userFills`),
   relayed through the backend to your browser. Falls back to REST polling (every
   30s) automatically if the socket drops, and reconnects.
 - **Summary cards:** Account Equity, Total Unrealized PnL, Total Realized PnL
@@ -233,8 +233,16 @@ All public, read-only:
   - `{ "type": "userFunding", "user": "0x…", "startTime": … }` — the funding
     payment ledger.
 - **WebSocket** `{HL_WS_URL}`
-  - `webData2` — live account state (positions, equity, unrealized PnL).
+  - `allMids` — every coin's mark price, one global subscription, ticking every
+    few seconds. This is the "something moved" signal behind live refreshes and
+    alert evaluation. It carries no user field, so consumers fan out to the
+    wallets they care about.
   - `userFills` — live trade fills as they happen.
+
+  Note: `webData2` is **not** used. Hyperliquid rejects that subscription with
+  `Error parsing JSON into valid websocket request`, so nothing ever arrives on
+  it — an earlier version of this dashboard subscribed to it and silently relied
+  on polling for everything as a result.
 
 ## How the data is normalized
 
@@ -310,11 +318,16 @@ All public, read-only:
 - **Funding rows carry no explorer link.** Funding settles as an internal ledger
   event rather than an on-chain transaction, so Hyperliquid reports a zero-filled
   hash for it. Trade rows all carry a working link.
-- **Alerts are triggered by the main-dex feed.** The `webData2` subscription that
-  wakes the evaluator carries main-dex state only, so a change confined to a builder
-  dex may not trigger an immediate evaluation. The values compared are always the
-  full aggregated ones — the evaluator re-fetches across every dex before deciding —
-  and the 5-minute backstop sweep catches anything the trigger missed.
+- **Alerts are triggered by price movement, not by account events.** The `allMids`
+  feed says prices moved; it does not say your account changed. A change driven by
+  something other than price — a deposit, a manual position change while prices sit
+  still — is picked up by the 5-minute backstop sweep rather than immediately. The
+  values compared are always the full aggregated ones: the evaluator re-fetches
+  across every perp dex before deciding.
+- **Alert latency is about 15 seconds.** `allMids` ticks every few seconds and
+  `ALERT_DEBOUNCE_MS` collapses those into one evaluation, because each evaluation
+  costs a full multi-dex account re-fetch. Lower it for faster alerts at the cost
+  of more API traffic.
 - **One recipient, one cooldown.** `ALERT_EMAIL_TO` is global and so is
   `ALERT_COOLDOWN_MS`; there are no per-rule overrides.
 - **A rule fires once per crossing.** It re-arms when the condition goes false. If
