@@ -547,6 +547,22 @@ test('PATCH /api/alerts/:id updates and validates', async () => {
   });
 });
 
+test('resuming a paused alert re-establishes the stream subscription', async () => {
+  const watched = [];
+  const runner = { watch: (a) => watched.push(a), unwatch: () => {} };
+  await withWallet(async (base) => {
+    const { alert } = await (await postAlert(base, VALID)).json();
+    watched.length = 0; // ignore the watch POST already did
+    const patch = (body) => fetch(`${base}/api/alerts/${alert.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    await patch({ enabled: false });
+    assert.deepEqual(watched, [], 'pausing does not watch');
+    await patch({ enabled: true });
+    assert.deepEqual(watched, [ADDR], 'resuming does');
+  }, { runner });
+});
+
 test('DELETE /api/alerts/:id removes a rule', async () => {
   await withWallet(async (base) => {
     const { alert } = await (await postAlert(base, VALID)).json();

@@ -257,6 +257,10 @@ export function createApp(db, overrides = {}) {
 
     const alert = db.updateAlert(id, patch);
     if (!alert) return res.status(404).json({ error: 'No such alert.' });
+    // POST watches on create; a rule coming back from paused needs the same, or
+    // it lives on an address the runner holds no webData2 reference for and only
+    // the slow backstop sweep ever reaches it.
+    if (alert.enabled) runner?.watch(alert.address);
     res.json({ alert });
   });
 
