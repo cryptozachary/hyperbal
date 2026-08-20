@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mailState } from '../public/js/alerts.js';
+import { mailState, addBlockedReason } from '../public/js/alerts.js';
 
 // Whether email is configured is knowledge the panel only has after /api/alerts
 // answers. Modelling it as a boolean defaulted to false meant the panel asserted
@@ -25,4 +25,17 @@ test('a confirmed yes enables the button and drops the banner', () => {
 // request either succeeds, or returns the 503 that says exactly what's wrong.
 test('the unknown state never silently swallows a click', () => {
   assert.equal(mailState(null).disabled, false);
+});
+
+// A click that does nothing, with no message, is indistinguishable from a broken
+// app. Every one of these used to be a bare `return`.
+test('every blocked add path explains itself', () => {
+  const ok = { address: '0xabc', metrics: { account: {} }, scope: 'account', coin: '' };
+  assert.equal(addBlockedReason(ok), null);
+
+  assert.match(addBlockedReason({ ...ok, address: null }), /select a wallet/i);
+  assert.match(addBlockedReason({ ...ok, metrics: null }), /still loading/i);
+  assert.match(addBlockedReason({ ...ok, scope: 'position', coin: '' }), /no open positions/i);
+  // A position rule with a coin is fine.
+  assert.equal(addBlockedReason({ ...ok, scope: 'position', coin: 'BTC' }), null);
 });

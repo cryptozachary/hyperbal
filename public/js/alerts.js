@@ -147,11 +147,22 @@ export async function load() {
   }
 }
 
+// Why a click cannot proceed, or null if it can. Pure and exported so every
+// blocked case is pinned by a test. A bare `return` here produces a button that
+// does nothing at all with no explanation, which is indistinguishable from a
+// broken app — this panel shipped exactly that and it cost an afternoon.
+export function addBlockedReason({ address, metrics, scope, coin }) {
+  if (!address) return 'Select a wallet before adding an alert.';
+  if (!metrics) return 'Alerts are still loading — give it a moment and try again.';
+  if (scope === 'position' && !coin) return 'This wallet has no open positions to alert on.';
+  return null;
+}
+
 async function add() {
-  if (!address) return;
   const scope = $('alertScope').value;
   const coin = $('alertCoin').value;
-  if (scope === 'position' && !coin) { toast('This wallet has no open positions to alert on.', 'error'); return; }
+  const blocked = addBlockedReason({ address, metrics, scope, coin });
+  if (blocked) { toast(blocked, 'error'); return; }
 
   const btn = $('alertAddBtn');
   btn.disabled = true;
