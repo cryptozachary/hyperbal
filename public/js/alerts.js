@@ -11,6 +11,12 @@ let rows = [];
 let emailConfigured = false;
 let loadSeq = 0;          // generation guard — same mySeq/want pattern as fills.js
 
+// What to show beside the threshold input. roe is stored x100 and
+// liquidationDistancePct is already a percentage, so an unlabelled box leaves the
+// user guessing whether to type 15 or 0.15 — and both mistakes look like a broken
+// feature rather than a mistyped number.
+const UNIT_LABEL = { usd: 'USD', pct: '%', x: '×', count: '' };
+
 // Mirrors describeRule()/formatValue() in alerts.js on the server — a deliberate
 // hand copy so a row renders without a second round trip. Keep the two in step;
 // the locale difference is intentional (the server pins en-US for email, the
@@ -75,6 +81,13 @@ function syncForm() {
     metricSel.appendChild(opt);
   }
 
+  const showUnit = () => {
+    const meta = metrics?.[scope]?.[metricSel.value];
+    $('alertUnit').textContent = UNIT_LABEL[meta?.unit] ?? '';
+  };
+  showUnit();
+  metricSel.onchange = showUnit;
+
   const coinSel = $('alertCoin');
   coinSel.classList.toggle('hidden', scope !== 'position');
   if (scope !== 'position') return;
@@ -87,10 +100,14 @@ function syncForm() {
     coinSel.appendChild(opt);
     return;
   }
-  for (const p of positions) {
+  // Deduped: mergeAccounts concatenates positions across perp dexes without
+  // merging by coin, so a coin held on two dexes appears twice. A rule stores only
+  // the coin and resolveMetric matches the first, so offering two identical
+  // options would let the user pick one that silently watches the other.
+  for (const coin of [...new Set(positions.map((p) => p.coin))]) {
     const opt = document.createElement('option');
-    opt.value = p.coin;
-    opt.textContent = p.coin;
+    opt.value = coin;
+    opt.textContent = coin;
     coinSel.appendChild(opt);
   }
 }

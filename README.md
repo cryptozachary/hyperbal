@@ -322,6 +322,11 @@ All public, read-only:
   stream.
 - **No firing history.** Each rule records only when it last fired, not a log of
   every firing.
+- **A position alert watches one perp dex.** Positions are aggregated across every
+  Hyperliquid perp dex, and a coin can be held on more than one. A rule identifies
+  its position by coin alone and resolves against the first match, so for a coin
+  held on two dexes it watches one leg and ignores the other. Account-scope rules
+  (equity, total unrealized PnL) are unaffected — those are true aggregates.
 - **Alerts are not a stop-loss.** They are a notification about data this dashboard
   observed; delivery is best-effort and the app is read-only. Never rely on one to
   manage risk on its own.

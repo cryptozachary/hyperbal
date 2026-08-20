@@ -275,3 +275,4 @@ div.empty{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2)}
 .alert-add{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;
   margin-top:var(--sp-4);padding-top:var(--sp-4);border-top:1px solid var(--line)}
 .alert-add input[type="number"]{width:140px}
+.alert-unit{color:var(--muted);font-size:var(--fs-sm);min-width:2ch}
