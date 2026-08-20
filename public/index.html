@@ -152,6 +152,35 @@
     </section>
 
     <section class="panel">
+      <div class="panel-head">
+        <h2>Alerts</h2>
+        <button id="alertTestBtn" title="Send a test email to check your SMTP settings">✉ Send test email</button>
+      </div>
+      <div id="alertEmailWarn" class="export-note hidden"></div>
+      <div id="alertList" class="alerts"></div>
+      <div id="alertsEmpty" class="empty hidden"><span class="empty-icon">◎</span>No alerts yet.</div>
+      <div class="alert-add">
+        <select id="alertScope" aria-label="Alert scope">
+          <option value="account">Account</option>
+          <option value="position">Position</option>
+        </select>
+        <select id="alertCoin" class="hidden" aria-label="Coin"></select>
+        <select id="alertMetric" aria-label="Metric"></select>
+        <select id="alertOperator" aria-label="Operator">
+          <option value="above">above</option>
+          <option value="below">below</option>
+        </select>
+        <input id="alertThreshold" type="number" step="any" placeholder="Threshold" aria-label="Threshold" />
+        <button id="alertAddBtn">Add alert</button>
+      </div>
+      <p class="export-note">
+        Alerts are evaluated on the server every time your account changes, and swept
+        every few minutes as a backstop — they fire whether or not this page is open.
+        Each rule emails once per crossing and re-arms when the condition goes false.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Connected Agent Wallets</h2>
       <div id="agentsPanel" class="agents"></div>
     </section>

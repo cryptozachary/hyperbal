@@ -46,3 +46,13 @@ export const backfill = (address, resume) => {
 
 // Content-Disposition on the server makes this a download rather than a navigation.
 export const exportUrl = (address, params) => `/api/export/${address}.csv?${params}`;
+
+export const getAlerts = (address) => request(`/api/alerts?address=${address}`);
+export const createAlert = (rule) => request('/api/alerts', json(rule));
+export const updateAlert = (id, patch) => request(`/api/alerts/${id}`, {
+  method: 'PATCH',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(patch),
+});
+export const deleteAlert = (id) => request(`/api/alerts/${id}`, { method: 'DELETE' });
+export const testAlertEmail = () => request('/api/alerts/test', { method: 'POST' });
