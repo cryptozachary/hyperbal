@@ -69,3 +69,61 @@ export function resolveMetric(payload, rule) {
   const v = pos[rule.metric];
   return Number.isFinite(v) ? v : null;
 }
+
+// Decide what to do with each rule against one account payload. Returns one
+// decision per rule, in the order given: the observed value, whether to send, and
+// the `last_state` to persist (null = parked/unresolvable).
+//
+// A rule fires when the condition is true, was NOT true at the previous
+// evaluation, and the cooldown has elapsed. The middle clause is the edge
+// detection — a value that sits past its threshold for an hour produces one email,
+// not one per tick.
+//
+// These comparisons run here in JS, never in SQL: `last_state = NULL` must read as
+// "not true" so a parked rule can fire again, whereas a SQL `last_state != 1`
+// would evaluate to NULL and silently match nothing.
+export function evaluateRules(rules, payload, now, cooldownMs) {
+  return rules.map((rule) => {
+    const value = resolveMetric(payload, rule);
+    if (value === null) return { rule, value: null, fire: false, nextState: null };
+
+    const condition = rule.operator === 'above' ? value > rule.threshold
+      : rule.operator === 'below' ? value < rule.threshold
+      : null;
+    // An operator outside the whitelist parks the rule. The API validates on the
+    // way in, so this is only reachable via a hand-edited database — but treating
+    // an unknown operator as "below" would fire real emails off a typo.
+    if (condition === null) return { rule, value, fire: false, nextState: null };
+
+    if (!condition) return { rule, value, fire: false, nextState: 0 };
+    if (rule.last_state === 1) return { rule, value, fire: false, nextState: 1 };
+
+    // Inside the quiet period. nextState stays 0 — NOT 1 — so the very next
+    // evaluation past the window sees a still-true condition against a false prior
+    // state and fires. The cooldown delays an alert; it must never swallow one.
+    const cooled = rule.last_attempt_at == null || now - rule.last_attempt_at >= cooldownMs;
+    if (!cooled) return { rule, value, fire: false, nextState: 0 };
+
+    return { rule, value, fire: true, nextState: 1 };
+  });
+}
+
+// Value formatting by unit. Locale is pinned to en-US so an email reads the same
+// regardless of the server's locale — unlike public/js/format.js, which
+// deliberately follows the viewer's.
+export function formatValue(v, unit) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  if (unit === 'usd') return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (unit === 'pct') return `${v.toFixed(2)}%`;
+  if (unit === 'x') return `${v}×`;
+  return String(v);
+}
+
+// One phrasing of a rule, shared by the email subject and the UI list so the two
+// cannot drift into describing the same rule differently.
+export function describeRule(rule) {
+  const meta = METRICS[rule.scope]?.[rule.metric];
+  const name = meta ? meta.label : rule.metric;
+  const subject = rule.scope === 'position' ? `${rule.coin} ${name}` : name;
+  return `${subject} ${rule.operator} ${formatValue(rule.threshold, meta?.unit)}`;
+}

@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { METRICS, SCOPES, OPERATORS, isValidMetric, resolveMetric, liquidationDistancePct } from '../alerts.js';
+import {
+  METRICS, SCOPES, OPERATORS, isValidMetric, resolveMetric, liquidationDistancePct,
+  evaluateRules, describeRule, formatValue,
+} from '../alerts.js';
 
 // A representative assembleAccount() payload. Field names match normalizeAccount()
 // in hyperliquid.js — if those ever change, these tests are the tripwire.
@@ -86,4 +89,111 @@ test('liquidationDistancePct', () => {
   assert.equal(liquidationDistancePct(null), null);
   // A short's liquidation price sits above the mark; distance is still positive.
   assert.equal(liquidationDistancePct({ markPrice: 2650, liquidationPrice: 3180 }), 20);
+});
+
+const COOLDOWN = 900000;
+const NOW = 1_700_000_000_000;
+
+// One rule with sensible defaults; each test overrides only what it is about.
+const rule = (over = {}) => ({
+  id: 1, address: '0xabc', scope: 'account', coin: null, metric: 'equity',
+  operator: 'below', threshold: 5000, enabled: 1,
+  last_state: 0, last_attempt_at: null, last_fired_at: null, ...over,
+});
+
+const one = (r, payload = PAYLOAD, now = NOW) => evaluateRules([r], payload, now, COOLDOWN)[0];
+
+test('fires on a false to true transition', () => {
+  // equity is 10000, so a "below 20000" rule is true.
+  const d = one(rule({ threshold: 20000 }));
+  assert.equal(d.fire, true);
+  assert.equal(d.nextState, 1);
+  assert.equal(d.value, 10000);
+});
+
+test('does not fire while the condition stays true', () => {
+  const d = one(rule({ threshold: 20000, last_state: 1, last_attempt_at: NOW - COOLDOWN * 2 }));
+  assert.equal(d.fire, false);
+  assert.equal(d.nextState, 1);
+});
+
+test('does not fire when the condition is false, and records state 0', () => {
+  const d = one(rule({ threshold: 5000, last_state: 1 }));
+  assert.equal(d.fire, false);
+  assert.equal(d.nextState, 0);
+});
+
+test('the boundary fires neither operator', () => {
+  assert.equal(one(rule({ operator: 'below', threshold: 10000 })).fire, false);
+  assert.equal(one(rule({ operator: 'above', threshold: 10000 })).fire, false);
+  // Just past it, both do.
+  assert.equal(one(rule({ operator: 'below', threshold: 10000.01 })).fire, true);
+  assert.equal(one(rule({ operator: 'above', threshold: 9999.99 })).fire, true);
+});
+
+test('cooldown defers rather than dropping', () => {
+  const inWindow = rule({ threshold: 20000, last_state: 0, last_attempt_at: NOW - 60000 });
+  const blocked = one(inWindow);
+  assert.equal(blocked.fire, false);
+  // The critical assertion: state stays 0, so the next pass past the window fires.
+  assert.equal(blocked.nextState, 0);
+
+  const past = one(inWindow, PAYLOAD, NOW + COOLDOWN);
+  assert.equal(past.fire, true);
+  assert.equal(past.nextState, 1);
+});
+
+test('an unresolvable metric parks the rule', () => {
+  const d = one(rule({ scope: 'position', coin: 'SOL', metric: 'markPrice', threshold: 1 }));
+  assert.equal(d.fire, false);
+  assert.equal(d.value, null);
+  assert.equal(d.nextState, null);
+});
+
+test('a parked rule fires when it becomes resolvable and true', () => {
+  // last_state null (parked) compares as "not true", so a fresh crossing fires.
+  const d = one(rule({ scope: 'position', coin: 'BTC', metric: 'unrealizedPnl',
+    operator: 'below', threshold: -500, last_state: null }));
+  assert.equal(d.fire, true);
+  assert.equal(d.value, -1000);
+});
+
+test('an unknown operator parks rather than defaulting', () => {
+  const d = one(rule({ operator: 'equals', threshold: 10000 }));
+  assert.equal(d.fire, false);
+  assert.equal(d.nextState, null);
+});
+
+test('evaluateRules returns one decision per rule, in order', () => {
+  const out = evaluateRules(
+    [rule({ id: 1, threshold: 20000 }), rule({ id: 2, threshold: 1 })],
+    PAYLOAD, NOW, COOLDOWN,
+  );
+  assert.equal(out.length, 2);
+  assert.deepEqual(out.map((d) => d.rule.id), [1, 2]);
+  assert.deepEqual(out.map((d) => d.fire), [true, false]);
+});
+
+test('describeRule renders the shared phrasing', () => {
+  assert.equal(
+    describeRule(rule({ scope: 'position', coin: 'BTC', metric: 'unrealizedPnl', operator: 'below', threshold: -500 })),
+    'BTC unrealized PnL below -$500',
+  );
+  assert.equal(
+    describeRule(rule({ metric: 'equity', operator: 'below', threshold: 5000 })),
+    'account equity below $5,000',
+  );
+  assert.equal(
+    describeRule(rule({ scope: 'position', coin: 'BTC', metric: 'liquidationDistancePct', operator: 'below', threshold: 5 })),
+    'BTC distance to liquidation below 5.00%',
+  );
+});
+
+test('formatValue by unit', () => {
+  assert.equal(formatValue(1234.5, 'usd'), '$1,234.5');
+  assert.equal(formatValue(-500, 'usd'), '-$500');
+  assert.equal(formatValue(12.3456, 'pct'), '12.35%');
+  assert.equal(formatValue(5, 'x'), '5×');
+  assert.equal(formatValue(2, 'count'), '2');
+  assert.equal(formatValue(null, 'usd'), '—');
 });
