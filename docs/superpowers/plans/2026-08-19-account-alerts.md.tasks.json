@@ -4,77 +4,98 @@
     {
       "id": 0,
       "subject": "Task 0: Configuration and dependency",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** New env vars land in config.js with sane defaults, and nodemailer is installed.\n\n**Files:**\n- Modify: config.js, .env.example, package.json\n- Test: test/config.test.js\n\n**Verify:** node --test test/config.test.js\n\n```json:metadata\n{\"files\": [\"config.js\", \".env.example\", \"package.json\", \"test/config.test.js\"], \"verifyCommand\": \"node --test test/config.test.js\", \"acceptanceCriteria\": [\"alertCooldownMs defaults to 900000, alertPollIntervalMs to 300000, alertDebounceMs to 5000\", \"smtpPort defaults to 587\", \"dashboardUrl defaults to http://localhost:<port> using the same resolved port\", \"nodemailer is in dependencies\"]}\n```"
     },
     {
       "id": 1,
       "subject": "Task 1: Metric whitelist and resolution",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** alerts.js exposes the whitelist and can read any listed metric off an assembleAccount() payload.\n\n**Files:**\n- Create: alerts.js\n- Test: test/alerts.test.js\n\n**Verify:** node --test test/alerts.test.js\n\n```json:metadata\n{\"files\": [\"alerts.js\", \"test/alerts.test.js\"], \"verifyCommand\": \"node --test test/alerts.test.js\", \"acceptanceCriteria\": [\"METRICS keyed by scope with label and unit per metric\", \"isValidMetric rejects unknown scope, unknown metric, and wrong scope\", \"resolveMetric returns the value for every whitelisted metric\", \"resolveMetric returns null rather than 0 when unresolvable\", \"liquidationDistancePct computes |mark-liq|/|mark|*100, null on unusable input\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Firing semantics",
-      "status": "pending",
-      "blockedBy": [1],
+      "status": "completed",
+      "blockedBy": [
+        1
+      ],
       "description": "**Goal:** evaluateRules decides fire/no-fire with edge detection and a deferring cooldown, plus describeRule/formatValue.\n\n**Files:**\n- Modify: alerts.js\n- Test: test/alerts.test.js\n\n**Verify:** node --test test/alerts.test.js\n\n```json:metadata\n{\"files\": [\"alerts.js\", \"test/alerts.test.js\"], \"verifyCommand\": \"node --test test/alerts.test.js\", \"acceptanceCriteria\": [\"Fires on a false->true transition\", \"Does not re-fire while the condition stays true\", \"value === threshold fires neither operator\", \"Cooldown defers: nextState stays 0 inside the window, fires once past it\", \"Unresolvable metric yields nextState null and no fire\", \"Unknown operator parks the rule\", \"describeRule renders 'BTC unrealized PnL below -$500'\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Alerts table and CRUD",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** db.js stores rules, reads them back, records evaluation outcomes, and purges them with their wallet.\n\n**Files:**\n- Modify: db.js\n- Test: test/db.test.js\n\n**Verify:** node --test test/db.test.js\n\n```json:metadata\n{\"files\": [\"db.js\", \"test/db.test.js\"], \"verifyCommand\": \"node --test test/db.test.js\", \"acceptanceCriteria\": [\"alerts table with the spec columns and an index on address\", \"createAlert returns the stored row including its new id\", \"listAlerts returns all rules; listEnabledAlerts only enabled ones\", \"alertAddresses returns distinct addresses with an enabled rule\", \"updateAlert patches enabled/threshold and resets last_state to NULL\", \"updateAlert returns null and deleteAlert returns false for an unknown id\", \"saveAlertResult writes last_state and leaves null timestamps untouched\", \"deleteWallet purges that wallet's alerts only\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: Email transport",
-      "status": "pending",
-      "blockedBy": [0],
+      "status": "completed",
+      "blockedBy": [
+        0
+      ],
       "description": "**Goal:** notifier.js sends over SMTP when configured, logs a no-op when not, and never opens a socket in tests.\n\n**Files:**\n- Create: notifier.js\n- Test: test/notifier.test.js\n\n**Verify:** node --test test/notifier.test.js\n\n```json:metadata\n{\"files\": [\"notifier.js\", \"test/notifier.test.js\"], \"verifyCommand\": \"node --test test/notifier.test.js\", \"acceptanceCriteria\": [\"Missing smtpHost or alertEmailTo gives configured:false and a send resolving {sent:false}\", \"A configured notifier passes from/to/subject/text and resolves {sent:true}\", \"Port 465 sets secure:true; 587 sets secure:false\", \"auth omitted entirely when smtpUser is blank\", \"A transport rejection propagates\"]}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: The alert runner",
-      "status": "pending",
-      "blockedBy": [2, 3, 4],
+      "status": "completed",
+      "blockedBy": [
+        2,
+        3,
+        4
+      ],
       "description": "**Goal:** alert-runner.js turns stream ticks and a backstop interval into evaluations, sends the emails, and persists each outcome.\n\n**Files:**\n- Create: alert-runner.js\n- Test: test/alert-runner.test.js\n\n**Verify:** node --test test/alert-runner.test.js\n\n```json:metadata\n{\"files\": [\"alert-runner.js\", \"test/alert-runner.test.js\"], \"verifyCommand\": \"node --test test/alert-runner.test.js\", \"acceptanceCriteria\": [\"A firing rule sends one email and persists lastState 1 with both timestamps\", \"A non-firing rule persists nextState and no timestamps\", \"A send failure persists the existing last_state plus attemptAt so it retries\", \"An unconfigured notifier advances state but leaves last_fired_at null\", \"A throwing assembleAccount is caught, no state changes, nothing escapes\", \"start() watches each alerting address exactly once\", \"Email subject and body carry the rule, the value, and the dashboard URL\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: HTTP routes",
-      "status": "pending",
-      "blockedBy": [3, 2],
+      "status": "completed",
+      "blockedBy": [
+        3,
+        2
+      ],
       "description": "**Goal:** Five /api/alerts routes with validation that rejects every malformed rule shape.\n\n**Files:**\n- Modify: server.js\n- Test: test/server.test.js\n\n**Verify:** node --test test/server.test.js\n\n```json:metadata\n{\"files\": [\"server.js\", \"test/server.test.js\"], \"verifyCommand\": \"node --test test/server.test.js\", \"acceptanceCriteria\": [\"GET /api/alerts requires address; missing or invalid is a 400\", \"GET returns rules, the metric whitelist, and emailConfigured\", \"POST rejects bad address, scope, metric, wrong-scope metric, missing coin, bad operator, non-finite threshold\", \"POST for a wallet not on the watch list is a 400\", \"PATCH updates enabled/threshold, 404s an unknown id, 400s an empty patch\", \"DELETE removes a rule and 404s an unknown id\", \"POST /api/alerts/test returns 503 when mail is unconfigured\"]}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: Bootstrap wiring",
-      "status": "pending",
-      "blockedBy": [5, 6],
+      "status": "completed",
+      "blockedBy": [
+        5,
+        6
+      ],
       "description": "**Goal:** The real server builds a notifier and a runner, starts it, and releases a deleted wallet's subscription.\n\n**Files:**\n- Modify: server.js\n\n**Verify:** npm test, then npm start\n\n```json:metadata\n{\"files\": [\"server.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"createNotifier(config) and createAlertRunner(...) built in the bootstrap and passed to createApp\", \"runner.start() runs after stream.start()\", \"Deleting a wallet calls runner.unwatch(address) alongside stream.untrack(address)\", \"npm test passes and npm start boots with an empty .env\"]}\n```"
     },
     {
       "id": 8,
       "subject": "Task 8: API client, markup, and styles",
-      "status": "pending",
-      "blockedBy": [6],
+      "status": "completed",
+      "blockedBy": [
+        6
+      ],
       "description": "**Goal:** The browser can reach the five routes, and the panel has a place to render.\n\n**Files:**\n- Modify: public/js/api.js, public/index.html, public/styles.css\n\n**Verify:** npm start, open http://localhost:3005, console clean\n\n```json:metadata\n{\"files\": [\"public/js/api.js\", \"public/index.html\", \"public/styles.css\"], \"verifyCommand\": \"npm start\", \"acceptanceCriteria\": [\"api.js exports getAlerts, createAlert, updateAlert, deleteAlert, testAlertEmail\", \"index.html has the Alerts panel with every id the panel module reads\", \"The page still renders with no console errors\"]}\n```"
     },
     {
       "id": 9,
       "subject": "Task 9: The alerts panel",
-      "status": "pending",
-      "blockedBy": [8, 7],
+      "status": "completed",
+      "blockedBy": [
+        8,
+        7
+      ],
       "description": "**Goal:** The panel lists, creates, toggles, and deletes rules, and reports unconfigured email honestly.\n\n**Files:**\n- Create: public/js/alerts.js\n- Modify: public/js/app.js\n\n**Verify:** npm start, walk the 8-point manual check in the plan\n\n```json:metadata\n{\"files\": [\"public/js/alerts.js\", \"public/js/app.js\"], \"verifyCommand\": \"npm start\", \"acceptanceCriteria\": [\"Metric dropdown built from the server's metrics, filtered by scope\", \"Choosing position reveals a coin dropdown from the wallet's open positions\", \"Adding, toggling, and deleting a rule each reload the list\", \"A failed request surfaces a toast and leaves the list as it was\", \"Unconfigured email shows the banner and disables the test button\", \"Switching wallets clears the previous wallet's rules first\"]}\n```"
     },
     {
       "id": 10,
       "subject": "Task 10: Documentation",
-      "status": "pending",
-      "blockedBy": [9],
+      "status": "completed",
+      "blockedBy": [
+        9
+      ],
       "description": "**Goal:** The README describes the feature, its configuration, and its honest limits.\n\n**Files:**\n- Modify: README.md\n\n**Verify:** npm test, then read the README for contradictions\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"Features section mentions alerts\", \"Configure section documents all ten new env vars\", \"Project structure lists the four new modules\", \"Limitations names the main-dex trigger, the cooldown, and the single recipient\", \"Manual verification checklist covers the alerts panel\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-08-19"
+  "lastUpdated": "2026-08-20"
 }
