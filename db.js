@@ -184,16 +184,22 @@ export function openDb(dbPath) {
     `),
     deleteAlert: db.prepare(`DELETE FROM alerts WHERE id = ?`),
     removeAlerts: db.prepare(`DELETE FROM alerts WHERE address = ?`),
-    // Mirrors the runner's three outcomes. last_state is assigned directly (NULL is
-    // a meaningful value here — a parked rule); the two timestamps are coalesced,
-    // so a pass that sent nothing leaves them exactly as they were.
+    // Compare-and-set on last_state. The runner reads a rule, awaits a network
+    // round trip, then writes back — and in that window a PATCH may have reset
+    // last_state to NULL to re-arm the rule. Writing the pre-await value over that
+    // would silently undo the re-arm and suppress the next real crossing, which is
+    // the exact bug updateAlert's NULL reset exists to prevent. `IS` rather than
+    // `=` because the expected value is very often NULL.
     saveAlertResult: db.prepare(`
       UPDATE alerts SET
         last_state = @lastState,
         last_attempt_at = COALESCE(@attemptAt, last_attempt_at),
         last_fired_at = COALESCE(@firedAt, last_fired_at)
-      WHERE id = @id
+      WHERE id = @id AND last_state IS @prevState
     `),
+    // The send-failure path: advance the retry throttle without touching
+    // last_state at all, so there is nothing to clobber and no guard needed.
+    saveAlertAttempt: db.prepare(`UPDATE alerts SET last_attempt_at = @attemptAt WHERE id = @id`),
   };
 
   const FILL_DEFAULTS = { dir: null, builder_fee: null, hash: null, oid: null, fee_token: null };
@@ -296,8 +302,12 @@ export function openDb(dbPath) {
       return stmts.getAlert.get(id) ?? null;
     },
     deleteAlert(id) { return stmts.deleteAlert.run(id).changes > 0; },
-    saveAlertResult(id, { lastState = null, attemptAt = null, firedAt = null } = {}) {
-      stmts.saveAlertResult.run({ id, lastState, attemptAt, firedAt });
+    // Returns true if the write landed, false if the rule changed underneath us
+    // (patched, or written by an overlapping evaluation) — in which case the newer
+    // state wins and this pass's conclusion is stale.
+    saveAlertResult(id, { prevState = null, lastState = null, attemptAt = null, firedAt = null } = {}) {
+      return stmts.saveAlertResult.run({ id, prevState, lastState, attemptAt, firedAt }).changes > 0;
     },
+    saveAlertAttempt(id, attemptAt) { stmts.saveAlertAttempt.run({ id, attemptAt }); },
   };
 }

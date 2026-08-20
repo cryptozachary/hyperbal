@@ -57,7 +57,21 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
     stream?.watch(address);
   }
 
-  async function evaluateAddress(address) {
+  const inFlight = new Map(); // address -> in-progress evaluation
+
+  // The read -> await assembleAccount -> write cycle is not atomic, so two
+  // overlapping passes would both read last_state = 0 and both send. A stream tick
+  // landing during a backstop sweep makes that routine rather than theoretical.
+  // Callers join the pass already running instead of starting a second one.
+  function evaluateAddress(address) {
+    const running = inFlight.get(address);
+    if (running) return running;
+    const pass = runEvaluation(address).finally(() => inFlight.delete(address));
+    inFlight.set(address, pass);
+    return pass;
+  }
+
+  async function runEvaluation(address) {
     const rules = db.listEnabledAlerts(address);
     if (!rules.length) return;
 
@@ -77,13 +91,20 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
 
     const ts = now();
     for (const decision of evaluateRules(rules, payload, ts, opts.alertCooldownMs)) {
+      const prevState = decision.rule.last_state ?? null;
       if (!decision.fire) {
-        db.saveAlertResult(decision.rule.id, { lastState: decision.nextState });
+        // Skip the write when nothing changed — the common case on every tick.
+        // Each no-op UPDATE is a WAL write and one more chance to overwrite a
+        // concurrent re-arm.
+        if (decision.nextState !== prevState) {
+          db.saveAlertResult(decision.rule.id, { prevState, lastState: decision.nextState });
+        }
         continue;
       }
       try {
         const result = await notifier.send(buildEmail(decision, payload, ts, opts));
         db.saveAlertResult(decision.rule.id, {
+          prevState,
           lastState: 1,
           attemptAt: ts,
           // Only a real send advances last_fired_at. With mail unconfigured the
@@ -92,10 +113,10 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
           firedAt: result?.sent ? ts : null,
         });
       } catch (err) {
-        // Leave last_state exactly as it was so the rule retries; last_attempt_at
-        // throttles that retry to the cooldown cadence rather than every tick.
+        // Advance only the retry throttle. last_state is deliberately left
+        // untouched: the rule must retry, and a concurrent re-arm must survive.
         console.warn(`[alerts] send failed for rule ${decision.rule.id}: ${err.message}`);
-        db.saveAlertResult(decision.rule.id, { lastState: decision.rule.last_state ?? null, attemptAt: ts });
+        db.saveAlertAttempt(decision.rule.id, ts);
       }
     }
   }
@@ -111,8 +132,20 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
     timers.set(address, t);
   }
 
+  let sweeping = false;
+
   async function sweep() {
-    for (const address of db.alertAddresses()) await evaluateAddress(address);
+    // Sequential by design — one assembleAccount per wallet — so a slow upstream
+    // can make a sweep outlast its own interval. Without this guard those sweeps
+    // stack, each one adding REST load to the API that is already the reason it is
+    // slow.
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      for (const address of db.alertAddresses()) await evaluateAddress(address);
+    } finally {
+      sweeping = false;
+    }
   }
 
   return {
@@ -146,6 +179,10 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
       pollTimer = null;
       if (onAccount) stream?.off('account', onAccount);
       onAccount = null;
+      // Release every reference start() took, so a stop/start pair doesn't leave
+      // the upstream subscription ref-count permanently inflated.
+      for (const address of watched) stream?.unwatch(address);
+      watched.clear();
     },
 
     // Called when a wallet is deleted, so the runner releases its subscription.

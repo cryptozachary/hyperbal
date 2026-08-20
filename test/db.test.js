@@ -369,24 +369,42 @@ test('deleteAlert', () => {
 test('saveAlertResult writes state and leaves null timestamps alone', () => {
   const db = freshDb();
   const a = db.createAlert(ALERT);
-  db.saveAlertResult(a.id, { lastState: 1, attemptAt: 500, firedAt: 500 });
+  assert.equal(db.saveAlertResult(a.id, { prevState: null, lastState: 1, attemptAt: 500, firedAt: 500 }), true);
 
   // A no-fire pass: state advances, timestamps must survive untouched.
-  db.saveAlertResult(a.id, { lastState: 0 });
+  db.saveAlertResult(a.id, { prevState: 1, lastState: 0 });
   let row = db.listAlerts('0xaaa')[0];
   assert.equal(row.last_state, 0);
   assert.equal(row.last_attempt_at, 500);
   assert.equal(row.last_fired_at, 500);
 
-  // A failed send: attempt advances, fired does not.
-  db.saveAlertResult(a.id, { lastState: 0, attemptAt: 900 });
-  row = db.listAlerts('0xaaa')[0];
-  assert.equal(row.last_attempt_at, 900);
-  assert.equal(row.last_fired_at, 500);
-
   // Parking writes a genuine NULL rather than being swallowed as "no change".
-  db.saveAlertResult(a.id, { lastState: null });
+  db.saveAlertResult(a.id, { prevState: 0, lastState: null });
   assert.equal(db.listAlerts('0xaaa')[0].last_state, null);
+});
+
+test('saveAlertResult refuses to write over a state that moved underneath it', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  db.saveAlertResult(a.id, { prevState: null, lastState: 1, attemptAt: 500, firedAt: 500 });
+
+  // A PATCH re-arms the rule to NULL while an evaluation that read `1` is still
+  // awaiting the network. That evaluation's write must not land.
+  db.updateAlert(a.id, { threshold: 7000 });
+  assert.equal(db.saveAlertResult(a.id, { prevState: 1, lastState: 1 }), false);
+  assert.equal(db.listAlerts('0xaaa')[0].last_state, null, 're-arm survives');
+});
+
+test('saveAlertAttempt advances the retry throttle and nothing else', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  db.saveAlertResult(a.id, { prevState: null, lastState: 1, attemptAt: 500, firedAt: 500 });
+
+  db.saveAlertAttempt(a.id, 900);
+  const row = db.listAlerts('0xaaa')[0];
+  assert.equal(row.last_attempt_at, 900);
+  assert.equal(row.last_fired_at, 500, 'a failed send never claims it fired');
+  assert.equal(row.last_state, 1, 'state untouched, so the rule retries');
 });
 
 test('deleteWallet purges that wallet alerts only', () => {
