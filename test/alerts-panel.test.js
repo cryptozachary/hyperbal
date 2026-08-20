@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mailState, addBlockedReason } from '../public/js/alerts.js';
+import { mailState, addBlockedReason, panelStatus } from '../public/js/alerts.js';
 
 // Whether email is configured is knowledge the panel only has after /api/alerts
 // answers. Modelling it as a boolean defaulted to false meant the panel asserted
@@ -38,4 +38,13 @@ test('every blocked add path explains itself', () => {
   assert.match(addBlockedReason({ ...ok, scope: 'position', coin: '' }), /no open positions/i);
   // A position rule with a coin is fine.
   assert.equal(addBlockedReason({ ...ok, scope: 'position', coin: 'BTC' }), null);
+});
+
+test('a load failure outranks the mail notice and persists', () => {
+  assert.equal(panelStatus({ loadError: null, emailConfigured: true }), null);
+  assert.match(panelStatus({ loadError: null, emailConfigured: false }), /not configured/i);
+  // Nothing is claimed before the server has answered.
+  assert.equal(panelStatus({ loadError: null, emailConfigured: null }), null);
+  // If we couldn't read our own state, say that instead of guessing about mail.
+  assert.match(panelStatus({ loadError: 'Request failed (502)', emailConfigured: false }), /502/);
 });

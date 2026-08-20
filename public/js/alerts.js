@@ -13,6 +13,7 @@ let rows = [];
 // that indistinguishable from a confirmed "not configured", so the panel disabled
 // the test button and asserted a reason it had not yet checked.
 let emailConfigured = null;
+let loadError = null;     // why the panel could not read its own state, if it couldn't
 let loadSeq = 0;          // generation guard — same mySeq/want pattern as fills.js
 
 // What to show beside the threshold input. roe is stored x100 and
@@ -58,6 +59,20 @@ export function mailState(configured) {
   return { disabled: !configured, warn: !configured };
 }
 
+// The panel's one persistent line. A load failure outranks the mail notice: if we
+// could not read our own state, anything else we might claim is a guess. Returns
+// null when there is genuinely nothing to say.
+//
+// This is persistent by design. Both of this panel's bugs were invisible because
+// the only report was a toast that cleared itself after five seconds.
+export function panelStatus({ loadError, emailConfigured }) {
+  if (loadError) return `Couldn't load alerts: ${loadError}`;
+  if (mailState(emailConfigured).warn) {
+    return 'Email is not configured — alerts will be recorded but not sent. Set SMTP_HOST and ALERT_EMAIL_TO in .env.';
+  }
+  return null;
+}
+
 function paint() {
   const list = $('alertList');
   list.innerHTML = '';
@@ -76,11 +91,11 @@ function paint() {
     list.appendChild(row);
   }
 
-  const { disabled, warn: showWarn } = mailState(emailConfigured);
+  const status = panelStatus({ loadError, emailConfigured });
   const warn = $('alertEmailWarn');
-  warn.classList.toggle('hidden', !showWarn);
-  warn.textContent = 'Email is not configured — alerts will be recorded but not sent. Set SMTP_HOST and ALERT_EMAIL_TO in .env.';
-  $('alertTestBtn').disabled = disabled;
+  warn.classList.toggle('hidden', !status);
+  warn.textContent = status || '';
+  $('alertTestBtn').disabled = mailState(emailConfigured).disabled;
 }
 
 // Rebuild the metric dropdown for the selected scope, and show the coin dropdown
@@ -139,10 +154,15 @@ export async function load() {
     rows = data.alerts;
     metrics = data.metrics;
     emailConfigured = data.emailConfigured;
+    loadError = null;
     paint();
     syncForm();
   } catch (err) {
     if (mySeq !== loadSeq || want !== address) return;
+    // Persist it in the panel as well as toasting: a panel that cannot load its
+    // own state must keep saying so, not mention it once and fall silent.
+    loadError = errMsg(err);
+    paint();
     toast("Couldn't load alerts: " + errMsg(err), 'error');
   }
 }
