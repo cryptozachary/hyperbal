@@ -5,7 +5,7 @@ function clean(v) {
 }
 
 export const config = {
-  port: Number(clean(process.env.PORT)) || 3000,
+  port: Number(clean(process.env.PORT)) || 3005,
   hlApiUrl: clean(process.env.HL_API_URL) || 'https://api.hyperliquid.xyz/info',
   hlWsUrl: clean(process.env.HL_WS_URL) || 'wss://api.hyperliquid.xyz/ws',
   defaultWallet: clean(process.env.DEFAULT_WALLET).toLowerCase(),
