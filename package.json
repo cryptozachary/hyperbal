@@ -4,7 +4,9 @@
   "description": "Read-only live Hyperliquid PnL dashboard",
   "type": "module",
   "main": "server.js",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
@@ -13,6 +15,7 @@
     "better-sqlite3": "^12.10.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "nodemailer": "^9.0.5",
     "ws": "^8.18.0"
   }
 }

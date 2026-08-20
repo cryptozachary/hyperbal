@@ -8,3 +8,13 @@ test('config has defaults', () => {
   assert.match(config.hlWsUrl, /^wss?:\/\//);
   assert.equal(typeof config.snapshotMinIntervalMs, 'number');
 });
+
+test('config has alert defaults', () => {
+  assert.equal(config.alertCooldownMs, 900000);
+  assert.equal(config.alertPollIntervalMs, 300000);
+  assert.equal(config.alertDebounceMs, 5000);
+  assert.equal(config.smtpPort, 587);
+  assert.match(config.dashboardUrl, /^https?:\/\//);
+  // The link in an alert email must point at the port the server actually listens on.
+  assert.ok(config.dashboardUrl.endsWith(String(config.port)));
+});
