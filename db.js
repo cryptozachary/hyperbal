@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS funding (
   szi REAL,
   PRIMARY KEY (address, ts, coin)
 );
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  address TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  coin TEXT,
+  metric TEXT NOT NULL,
+  operator TEXT NOT NULL,
+  threshold REAL NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_state INTEGER,
+  last_attempt_at INTEGER,
+  last_fired_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_addr ON alerts(address);
 `;
 
 export function openDb(dbPath) {
@@ -144,6 +159,41 @@ export function openDb(dbPath) {
     `),
     rangeFills: db.prepare(`SELECT MIN(ts) AS lo, MAX(ts) AS hi FROM fills WHERE address = ?`),
     rangeFunding: db.prepare(`SELECT MIN(ts) AS lo, MAX(ts) AS hi FROM funding WHERE address = ?`),
+    insertAlert: db.prepare(`
+      INSERT INTO alerts (address, scope, coin, metric, operator, threshold, enabled, created_at)
+      VALUES (@address, @scope, @coin, @metric, @operator, @threshold, 1, @now)
+    `),
+    getAlert: db.prepare(`SELECT * FROM alerts WHERE id = ?`),
+    listAlerts: db.prepare(`SELECT * FROM alerts WHERE address = ? ORDER BY created_at ASC, id ASC`),
+    listEnabledAlerts: db.prepare(`SELECT * FROM alerts WHERE address = ? AND enabled = 1 ORDER BY id ASC`),
+    alertAddresses: db.prepare(`SELECT DISTINCT address FROM alerts WHERE enabled = 1 ORDER BY address ASC`),
+    // Patch what was sent and leave the rest: COALESCE(@x, column) makes an
+    // omitted field mean "unchanged" rather than "set to null".
+    //
+    // last_state is deliberately NOT coalesced — it resets to NULL on every patch.
+    // A threshold that moved, or a rule coming back from disabled, describes a
+    // world the old edge state no longer refers to; carrying last_state = 1 across
+    // would suppress the first real crossing under the new settings.
+    // last_fired_at survives, so the UI keeps its history.
+    updateAlert: db.prepare(`
+      UPDATE alerts SET
+        enabled = COALESCE(@enabled, enabled),
+        threshold = COALESCE(@threshold, threshold),
+        last_state = NULL
+      WHERE id = @id
+    `),
+    deleteAlert: db.prepare(`DELETE FROM alerts WHERE id = ?`),
+    removeAlerts: db.prepare(`DELETE FROM alerts WHERE address = ?`),
+    // Mirrors the runner's three outcomes. last_state is assigned directly (NULL is
+    // a meaningful value here — a parked rule); the two timestamps are coalesced,
+    // so a pass that sent nothing leaves them exactly as they were.
+    saveAlertResult: db.prepare(`
+      UPDATE alerts SET
+        last_state = @lastState,
+        last_attempt_at = COALESCE(@attemptAt, last_attempt_at),
+        last_fired_at = COALESCE(@firedAt, last_fired_at)
+      WHERE id = @id
+    `),
   };
 
   const FILL_DEFAULTS = { dir: null, builder_fee: null, hash: null, oid: null, fee_token: null };
@@ -163,12 +213,13 @@ export function openDb(dbPath) {
   });
 
   // One transaction so a mid-delete failure can't leave a wallet whose row is
-  // gone but whose fills and snapshots remain.
+  // gone but whose fills, snapshots, and alerts remain.
   const deleteWalletTxn = db.transaction((address) => {
     stmts.removeWallet.run(address);
     stmts.removeSnapshots.run(address);
     stmts.removeFills.run(address);
     stmts.removeFunding.run(address);
+    stmts.removeAlerts.run(address);
   });
 
   return {
@@ -225,6 +276,28 @@ export function openDb(dbPath) {
       if (last != null && point.ts - last < minIntervalMs) return false;
       stmts.insertSnapshot.run({ address, ...point });
       return true;
+    },
+    createAlert({ address, scope, coin = null, metric, operator, threshold }) {
+      const info = stmts.insertAlert.run({ address, scope, coin, metric, operator, threshold, now: Date.now() });
+      return stmts.getAlert.get(info.lastInsertRowid);
+    },
+    listAlerts(address) { return stmts.listAlerts.all(address); },
+    listEnabledAlerts(address) { return stmts.listEnabledAlerts.all(address); },
+    alertAddresses() { return stmts.alertAddresses.all().map((r) => r.address); },
+    // Returns the updated row, or null if there is no such alert.
+    updateAlert(id, { enabled, threshold } = {}) {
+      stmts.updateAlert.run({
+        id,
+        // better-sqlite3 rejects booleans and undefined bindings outright, so both
+        // are normalized here rather than at every call site.
+        enabled: enabled == null ? null : (enabled ? 1 : 0),
+        threshold: threshold == null ? null : Number(threshold),
+      });
+      return stmts.getAlert.get(id) ?? null;
+    },
+    deleteAlert(id) { return stmts.deleteAlert.run(id).changes > 0; },
+    saveAlertResult(id, { lastState = null, attemptAt = null, firedAt = null } = {}) {
+      stmts.saveAlertResult.run({ id, lastState, attemptAt, firedAt });
     },
   };
 }

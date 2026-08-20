@@ -294,3 +294,108 @@ test('listFillsRange returns the columns the export needs', () => {
     assert.ok(c in row, `missing column ${c}`);
   }
 });
+
+const ALERT = { address: '0xaaa', scope: 'account', coin: null, metric: 'equity', operator: 'below', threshold: 5000 };
+
+test('createAlert stores and returns the row', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  assert.ok(a.id > 0);
+  assert.equal(a.address, '0xaaa');
+  assert.equal(a.metric, 'equity');
+  assert.equal(a.threshold, 5000);
+  assert.equal(a.enabled, 1);
+  assert.equal(a.last_state, null);
+  assert.equal(a.last_fired_at, null);
+  assert.ok(a.created_at > 0);
+});
+
+test('listAlerts and listEnabledAlerts', () => {
+  const db = freshDb();
+  const on = db.createAlert(ALERT);
+  const off = db.createAlert({ ...ALERT, metric: 'marginUsed', threshold: 1 });
+  db.createAlert({ ...ALERT, address: '0xbbb' });
+  db.updateAlert(off.id, { enabled: 0 });
+
+  assert.equal(db.listAlerts('0xaaa').length, 2);
+  const enabled = db.listEnabledAlerts('0xaaa');
+  assert.equal(enabled.length, 1);
+  assert.equal(enabled[0].id, on.id);
+  assert.equal(db.listAlerts('0xbbb').length, 1);
+});
+
+test('alertAddresses lists distinct addresses with an enabled rule', () => {
+  const db = freshDb();
+  db.createAlert(ALERT);
+  db.createAlert({ ...ALERT, metric: 'marginUsed' }); // same address, second rule
+  const disabled = db.createAlert({ ...ALERT, address: '0xbbb' });
+  db.updateAlert(disabled.id, { enabled: 0 });
+
+  assert.deepEqual(db.alertAddresses(), ['0xaaa']);
+});
+
+test('updateAlert patches and re-arms', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  db.saveAlertResult(a.id, { lastState: 1, attemptAt: 111, firedAt: 111 });
+
+  const updated = db.updateAlert(a.id, { threshold: 7000 });
+  assert.equal(updated.threshold, 7000);
+  // Re-armed: the old edge state described a threshold that no longer exists.
+  assert.equal(updated.last_state, null);
+  // Firing history is NOT reset — the UI still shows when it last fired.
+  assert.equal(updated.last_fired_at, 111);
+
+  assert.equal(db.updateAlert(9999, { threshold: 1 }), null);
+});
+
+test('updateAlert toggles enabled without touching threshold', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  const off = db.updateAlert(a.id, { enabled: 0 });
+  assert.equal(off.enabled, 0);
+  assert.equal(off.threshold, 5000);
+  assert.equal(db.updateAlert(a.id, { enabled: 1 }).enabled, 1);
+});
+
+test('deleteAlert', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  assert.equal(db.deleteAlert(a.id), true);
+  assert.equal(db.listAlerts('0xaaa').length, 0);
+  assert.equal(db.deleteAlert(a.id), false);
+});
+
+test('saveAlertResult writes state and leaves null timestamps alone', () => {
+  const db = freshDb();
+  const a = db.createAlert(ALERT);
+  db.saveAlertResult(a.id, { lastState: 1, attemptAt: 500, firedAt: 500 });
+
+  // A no-fire pass: state advances, timestamps must survive untouched.
+  db.saveAlertResult(a.id, { lastState: 0 });
+  let row = db.listAlerts('0xaaa')[0];
+  assert.equal(row.last_state, 0);
+  assert.equal(row.last_attempt_at, 500);
+  assert.equal(row.last_fired_at, 500);
+
+  // A failed send: attempt advances, fired does not.
+  db.saveAlertResult(a.id, { lastState: 0, attemptAt: 900 });
+  row = db.listAlerts('0xaaa')[0];
+  assert.equal(row.last_attempt_at, 900);
+  assert.equal(row.last_fired_at, 500);
+
+  // Parking writes a genuine NULL rather than being swallowed as "no change".
+  db.saveAlertResult(a.id, { lastState: null });
+  assert.equal(db.listAlerts('0xaaa')[0].last_state, null);
+});
+
+test('deleteWallet purges that wallet alerts only', () => {
+  const db = freshDb();
+  for (const addr of ['0xaaa', '0xbbb']) {
+    db.upsertWallet(addr, 'w');
+    db.createAlert({ ...ALERT, address: addr });
+  }
+  db.deleteWallet('0xaaa');
+  assert.equal(db.listAlerts('0xaaa').length, 0);
+  assert.equal(db.listAlerts('0xbbb').length, 1);
+});
