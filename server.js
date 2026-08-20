@@ -285,7 +285,14 @@ export function createApp(db, overrides = {}) {
     }
   });
 
-  app.use(express.static('public'));
+  // no-store, not the default max-age=0 + ETag: this is a local single-user
+  // dashboard whose files are edited and reloaded constantly, and a browser
+  // holding a stale ES module here presents as the app being broken rather than
+  // as a caching problem — it cost an afternoon of debugging exactly once.
+  // Re-downloading ~90KB over loopback is not a cost worth optimising.
+  app.use(express.static('public', {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
+  }));
   return app;
 }
 

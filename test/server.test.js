@@ -588,3 +588,12 @@ test('POST /api/alerts/test sends through a configured notifier', async () => {
     assert.equal(sent.length, 1);
   });
 });
+
+test('static assets are served no-store', async () => {
+  // A stale cached ES module presents as a broken app, not as a caching problem.
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/index.html`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+  });
+});
