@@ -6,7 +6,9 @@ const $ = (id) => document.getElementById(id);
 
 let address = null;
 let metrics = null;       // the server's whitelist; the dropdowns are built from it
+let account = null;       // the latest account payload, for seeding thresholds
 let positions = [];       // current open positions, for the coin dropdown
+let thresholdDirty = false; // the user has typed here; stop seeding over them
 let rows = [];
 // Tri-state, deliberately: null means "the server hasn't told us yet", which is
 // the panel's state for the whole first load. A boolean defaulted to false made
@@ -26,6 +28,37 @@ const UNIT_LABEL = { usd: 'USD', pct: '%', x: '×', count: '' };
 // hand copy so a row renders without a second round trip. Keep the two in step;
 // the locale difference is intentional (the server pins en-US for email, the
 // browser follows the viewer), the number formatting is not.
+// The current value of a metric, for seeding the threshold box. A second hand copy
+// of resolveMetric() in the server's alerts.js — same bargain as describe() above:
+// the browser already holds this data, and a round trip to compute a default the
+// user is about to overwrite is not worth it. Keep the two in step.
+export function currentValue(account, { scope, coin, metric }) {
+  if (!account) return null;
+  if (scope === 'account') {
+    const v = account[metric];
+    return Number.isFinite(v) ? v : null;
+  }
+  const pos = (account.positions || []).find((p) => p.coin === coin);
+  if (!pos) return null;
+  if (metric === 'liquidationDistancePct') {
+    const { markPrice: mark, liquidationPrice: liq } = pos;
+    if (!Number.isFinite(mark) || !Number.isFinite(liq) || mark === 0) return null;
+    return (Math.abs(mark - liq) / Math.abs(mark)) * 100;
+  }
+  const v = pos[metric];
+  return Number.isFinite(v) ? v : null;
+}
+
+// What to put in the number input. Plain digits only — it is an <input type=number>,
+// so a formatted "$72,709" would be rejected outright and land as an empty box.
+// Rounded to the precision the unit is actually meaningful at, since seeding
+// 72709.35142 invites the user to think that precision matters.
+export function seedThreshold(v, unit) {
+  if (v == null || !Number.isFinite(v)) return '';
+  const dp = unit === 'usd' || unit === 'pct' ? 2 : unit === 'x' ? 1 : 4;
+  return String(Number(v.toFixed(dp)));
+}
+
 function describe(a) {
   const meta = metrics?.[a.scope]?.[a.metric];
   const name = meta ? meta.label : a.metric;
@@ -100,7 +133,10 @@ function paint() {
 
 // Rebuild the metric dropdown for the selected scope, and show the coin dropdown
 // only when it is meaningful.
-function syncForm() {
+// `force` re-seeds the threshold even over a typed value. True when the user
+// explicitly changed scope or metric — the number they typed described something
+// else — and false for background refreshes, which must not touch their input.
+function syncForm(force = false) {
   const scope = $('alertScope').value;
   const metricSel = $('alertMetric');
   metricSel.innerHTML = '';
@@ -111,16 +147,32 @@ function syncForm() {
     metricSel.appendChild(opt);
   }
 
+  // Seed the threshold with what the metric reads right now, so "alert me if this
+  // goes lower" starts from the truth instead of an empty box. Never overwrite
+  // something the user has typed: this also runs on the 30s account refresh.
+  const seed = (force) => {
+    if (!force && thresholdDirty) return;
+    const next = seedThreshold(
+      currentValue(account, { scope, coin: $('alertCoin').value, metric: metricSel.value }),
+      metrics?.[scope]?.[metricSel.value]?.unit,
+    );
+    if (next === '') return;   // nothing sensible to offer; leave the box alone
+    $('alertThreshold').value = next;
+    thresholdDirty = false;
+  };
   const showUnit = () => {
     const meta = metrics?.[scope]?.[metricSel.value];
     $('alertUnit').textContent = UNIT_LABEL[meta?.unit] ?? '';
   };
   showUnit();
-  metricSel.onchange = showUnit;
+  // An explicit metric choice re-seeds even over a typed value: the old number
+  // described a different metric and is almost never what they now want.
+  metricSel.onchange = () => { showUnit(); seed(true); };
 
   const coinSel = $('alertCoin');
   coinSel.classList.toggle('hidden', scope !== 'position');
-  if (scope !== 'position') return;
+  coinSel.onchange = () => seed(true);
+  if (scope !== 'position') { seed(force); return; }
 
   coinSel.innerHTML = '';
   if (!positions.length) {
@@ -140,6 +192,7 @@ function syncForm() {
     opt.textContent = coin;
     coinSel.appendChild(opt);
   }
+  seed(force);
 }
 
 export async function load() {
@@ -195,6 +248,7 @@ async function add() {
       threshold: $('alertThreshold').value,
     });
     $('alertThreshold').value = '';
+    thresholdDirty = false;   // the box is ours again; re-seed it below
     await load();
   } catch (err) {
     toast("Couldn't add alert: " + errMsg(err), 'error');
@@ -228,8 +282,9 @@ async function remove(a) {
 }
 
 // Called on every account refresh so the coin dropdown tracks what is actually held.
-export function setPositions(next) {
-  positions = next || [];
+export function setAccount(next) {
+  account = next || null;
+  positions = next?.positions || [];
   if (metrics) syncForm();
 }
 
@@ -249,7 +304,9 @@ export function reset() {
 }
 
 export function mount() {
-  $('alertScope').addEventListener('change', syncForm);
+  $('alertScope').addEventListener('change', () => syncForm(true));
+  // Once the user types, background refreshes stop seeding over them.
+  $('alertThreshold').addEventListener('input', () => { thresholdDirty = true; });
   $('alertAddBtn').addEventListener('click', add);
   $('alertTestBtn').addEventListener('click', async () => {
     const btn = $('alertTestBtn');

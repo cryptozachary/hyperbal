@@ -100,7 +100,7 @@ th{color:var(--muted);font-weight:600;font-size:var(--fs-xs);text-transform:uppe
 .pos{color:var(--pos)} .neg{color:var(--neg)}
 .empty,.error{padding:var(--sp-5);text-align:center;color:var(--muted)}
 .error{color:var(--neg);border:1px solid var(--neg-a40);border-radius:var(--r-md);margin-top:14px}
-.hidden{display:none}
+.hidden{display:none !important}  /* utility class: must beat div.empty (0,1,1) below, which otherwise keeps every empty state permanently visible */
 .foot{text-align:center;color:var(--muted);padding:var(--sp-4);font-size:var(--fs-sm);border-top:1px solid var(--line)}
 @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}}
 .wallet-badge{margin:0 0 14px;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);border:1px solid var(--accent-a40);

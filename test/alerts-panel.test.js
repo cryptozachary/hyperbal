@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mailState, addBlockedReason, panelStatus } from '../public/js/alerts.js';
+import { mailState, addBlockedReason, panelStatus, currentValue, seedThreshold } from '../public/js/alerts.js';
 
 // Whether email is configured is knowledge the panel only has after /api/alerts
 // answers. Modelling it as a boolean defaulted to false meant the panel asserted
@@ -47,4 +47,42 @@ test('a load failure outranks the mail notice and persists', () => {
   assert.equal(panelStatus({ loadError: null, emailConfigured: null }), null);
   // If we couldn't read our own state, say that instead of guessing about mail.
   assert.match(panelStatus({ loadError: 'Request failed (502)', emailConfigured: false }), /502/);
+});
+
+// --- seeding the threshold with the metric's current reading ---
+
+const ACCOUNT = {
+  equity: 72709.35142, marginUsed: 314.48, totalUnrealizedPnl: -337.23, openPositionsCount: 1,
+  positions: [{ coin: 'BTC', side: 'SHORT', size: -0.083, entryPrice: 68648,
+    markPrice: 72709, liquidationPrice: 75551.73, leverage: 10, marginUsed: 314.48,
+    unrealizedPnl: -337.23, roe: -59.16 }],
+};
+
+test('currentValue reads account and position metrics', () => {
+  assert.equal(currentValue(ACCOUNT, { scope: 'account', metric: 'equity' }), 72709.35142);
+  assert.equal(currentValue(ACCOUNT, { scope: 'account', metric: 'openPositionsCount' }), 1);
+  assert.equal(currentValue(ACCOUNT, { scope: 'position', coin: 'BTC', metric: 'markPrice' }), 72709);
+  assert.equal(currentValue(ACCOUNT, { scope: 'position', coin: 'BTC', metric: 'roe' }), -59.16);
+});
+
+test('currentValue yields nothing rather than a wrong default', () => {
+  assert.equal(currentValue(null, { scope: 'account', metric: 'equity' }), null);
+  assert.equal(currentValue(ACCOUNT, { scope: 'position', coin: 'ETH', metric: 'markPrice' }), null);
+  assert.equal(currentValue({ positions: [] }, { scope: 'account', metric: 'equity' }), null);
+});
+
+test('liquidation distance is derived, matching the server', () => {
+  // |72709 - 75551.73| / 72709 * 100
+  const v = currentValue(ACCOUNT, { scope: 'position', coin: 'BTC', metric: 'liquidationDistancePct' });
+  assert.ok(Math.abs(v - 3.909) < 0.001, `got ${v}`);
+});
+
+test('seedThreshold emits plain digits an <input type=number> accepts', () => {
+  // No separators or symbols: a formatted string is rejected and lands as an empty box.
+  assert.equal(seedThreshold(72709.35142, 'usd'), '72709.35');
+  assert.equal(seedThreshold(-59.163, 'pct'), '-59.16');
+  assert.equal(seedThreshold(10, 'x'), '10');
+  assert.equal(seedThreshold(-0.083, 'count'), '-0.083');
+  assert.equal(seedThreshold(null, 'usd'), '');
+  assert.match(seedThreshold(72709.35142, 'usd'), /^-?[\d.]+$/);
 });

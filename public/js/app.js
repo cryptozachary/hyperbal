@@ -43,7 +43,7 @@ async function refresh(showLoad = true) {
     const data = await api.getAccount(state.address);
     clearError();
     account.render(data);
-    alertsPanel.setPositions(data.positions || []);
+    alertsPanel.setAccount(data);
     await chartPanel.load();
     await loadSparks();
     await fills.load();
