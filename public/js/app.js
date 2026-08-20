@@ -4,6 +4,7 @@ import * as fills from './fills.js';
 import * as exportsPanel from './exports.js';
 import * as wallets from './wallets.js';
 import * as chartPanel from './chart-panel.js';
+import * as alertsPanel from './alerts.js';
 import { setStatus, setLoading, errMsg } from './feedback.js';
 
 const $ = (id) => document.getElementById(id);
@@ -42,6 +43,7 @@ async function refresh(showLoad = true) {
     const data = await api.getAccount(state.address);
     clearError();
     account.render(data);
+    alertsPanel.setPositions(data.positions || []);
     await chartPanel.load();
     await loadSparks();
     await fills.load();
@@ -62,6 +64,7 @@ function resetDashboard() {
   exportsPanel.reset();
   wallets.reset();
   chartPanel.reset();
+  alertsPanel.reset();
   clearError();
   setStatus('Enter a wallet', 'poll');
 }
@@ -78,9 +81,11 @@ async function selectAddress(address) {
   exportsPanel.setAddress(address);   // synchronous, in step with the others
   wallets.setCurrent(address);
   chartPanel.setAddress(address);
+  alertsPanel.setAddress(address);
   await refresh(true);
   await wallets.renderAgents(address);
   await exportsPanel.loadPeriods();   // same position as before, ordering preserved
+  await alertsPanel.load();
   if (state.wsConnected) state.ws.send(JSON.stringify({ type: 'watch', address }));
 }
 
@@ -122,6 +127,7 @@ async function init() {
   chartPanel.mount();
 
   fills.mount();
+  alertsPanel.mount();
   exportsPanel.mount({ onSynced: () => fills.load() });
   wallets.mount({ onSelect: selectAddress, onEmpty: resetDashboard });
   $('refreshBtn').addEventListener('click', () => refresh(true));
