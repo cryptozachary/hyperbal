@@ -21,7 +21,7 @@ function makeStream() {
   return { stream, getWs: () => ws };
 }
 
-test('track sends persistent userFills sub; watch ref-counts webData2', async () => {
+test('track sends persistent userFills sub; watch subscribes the global allMids', async () => {
   const { stream, getWs } = makeStream();
   stream.start();
   await new Promise((r) => setTimeout(r, 5));
@@ -29,7 +29,9 @@ test('track sends persistent userFills sub; watch ref-counts webData2', async ()
   stream.watch(ADDR);
   const subs = getWs().sent.filter((m) => m.method === 'subscribe');
   assert.ok(subs.some((s) => s.subscription.type === 'userFills' && s.subscription.user === ADDR));
-  assert.ok(subs.some((s) => s.subscription.type === 'webData2' && s.subscription.user === ADDR));
+  // allMids is global: no user field, one subscription however many wallets are watched.
+  assert.equal(subs.filter((s) => s.subscription.type === 'allMids').length, 1);
+  assert.equal(subs.find((s) => s.subscription.type === 'allMids').subscription.user, undefined);
 });
 
 test('unwatch ref-counts down and unsubscribes at zero', async () => {
@@ -42,8 +44,26 @@ test('unwatch ref-counts down and unsubscribes at zero', async () => {
   let unsubs = getWs().sent.filter((m) => m.method === 'unsubscribe');
   assert.equal(unsubs.length, 0);
   stream.unwatch(ADDR);        // count = 0, unsubscribe
-  unsubs = getWs().sent.filter((m) => m.method === 'unsubscribe' && m.subscription.type === 'webData2');
+  unsubs = getWs().sent.filter((m) => m.method === 'unsubscribe' && m.subscription.type === 'allMids');
   assert.equal(unsubs.length, 1);
+});
+
+test('a rejected subscription type is never sent (webData2 is gone)', async () => {
+  // Hyperliquid rejects webData2 with "Error parsing JSON into valid websocket
+  // request", so nothing ever arrived on it and every account-driven feature
+  // silently degraded to polling. It must not be resubscribed on reconnect either.
+  const { stream, getWs } = makeStream();
+  stream.start();
+  await new Promise((r) => setTimeout(r, 5));
+  stream.watch(ADDR);
+  assert.equal(getWs().sent.filter((m) => m.subscription?.type === 'webData2').length, 0);
+
+  const before = getWs();
+  before.emit('close');
+  await new Promise((r) => setTimeout(r, 1100));
+  assert.equal(getWs().sent.filter((m) => m.subscription?.type === 'webData2').length, 0);
+  // and the replacement is what gets re-armed on reconnect
+  assert.equal(getWs().sent.filter((m) => m.method === 'subscribe' && m.subscription.type === 'allMids').length, 1);
 });
 
 test('untrack unsubscribes userFills and drops it from the reconnect set', async () => {
@@ -68,19 +88,15 @@ test('untrack unsubscribes userFills and drops it from the reconnect set', async
   assert.equal(resubs.length, 0);
 });
 
-test('webData2 message emits normalized account with address', async () => {
+test('allMids message emits a mids event carrying the mids object', async () => {
   const { stream, getWs } = makeStream();
   stream.start();
   await new Promise((r) => setTimeout(r, 5));
   stream.watch(ADDR);
-  const got = new Promise((resolve) => stream.on('account', resolve));
-  getWs().emit('message', JSON.stringify({
-    channel: 'webData2',
-    data: { user: ADDR, clearinghouseState: { marginSummary: { accountValue: '10' }, assetPositions: [] } },
-  }));
+  const got = new Promise((resolve) => stream.on('mids', resolve));
+  getWs().emit('message', JSON.stringify({ channel: 'allMids', data: { mids: { BTC: '72817.5' } } }));
   const evt = await got;
-  assert.equal(evt.address, ADDR);
-  assert.equal(evt.account.equity, 10);
+  assert.deepEqual(evt, { mids: { BTC: '72817.5' } });
 });
 
 test('userFills message emits normalized fills with address', async () => {

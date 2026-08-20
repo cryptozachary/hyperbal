@@ -1,12 +1,12 @@
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
-import { normalizeAccount, normalizeFills } from './hyperliquid.js';
+import { normalizeFills } from './hyperliquid.js';
 
 // Manages the single upstream connection to Hyperliquid.
-// Emits: 'account' { address, account }, 'fills' { address, rows, recentRealized }, 'status' string.
+// Emits: 'mids' { mids }, 'fills' { address, rows, recentRealized }, 'status' string.
 export function createStream({ wsUrl, WebSocketImpl = WebSocket, wsFactory } = {}) {
   const emitter = new EventEmitter();
-  const webData2Refs = new Map(); // address -> count
+  const watchers = new Map();     // address -> count (allMids is global, but unwatch must stay balanced per address)
   const tracked = new Set();      // addresses with persistent userFills
   let ws = null;
   let pingTimer = null;
@@ -14,7 +14,7 @@ export function createStream({ wsUrl, WebSocketImpl = WebSocket, wsFactory } = {
 
   function activeSubs() {
     const subs = [];
-    for (const addr of webData2Refs.keys()) subs.push({ type: 'webData2', user: addr });
+    if (watchers.size > 0) subs.push({ type: 'allMids' });
     for (const addr of tracked) subs.push({ type: 'userFills', user: addr });
     return subs;
   }
@@ -38,10 +38,8 @@ export function createStream({ wsUrl, WebSocketImpl = WebSocket, wsFactory } = {
     });
     ws.on('message', (raw) => {
       let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
-      if (msg.channel === 'webData2') {
-        const cs = msg.data?.clearinghouseState;
-        const address = (msg.data?.user || '').toLowerCase() || undefined;
-        if (cs) emitter.emit('account', { address, account: normalizeAccount(cs) });
+      if (msg.channel === 'allMids') {
+        emitter.emit('mids', { mids: msg.data?.mids || {} });
       } else if (msg.channel === 'userFills') {
         const address = (msg.data?.user || '').toLowerCase() || undefined;
         const { rows, recentRealized } = normalizeFills(msg.data?.fills);
@@ -60,15 +58,24 @@ export function createStream({ wsUrl, WebSocketImpl = WebSocket, wsFactory } = {
 
   return Object.assign(emitter, {
     start() { connect(); },
+    // The per-address API is kept because callers depend on it, but the underlying
+    // subscription is a single global allMids. webData2 — the per-user feed this
+    // used to hold — is rejected outright by the API ("Error parsing JSON into
+    // valid websocket request"), so no message ever arrived and every
+    // account-driven feature silently degraded to polling. allMids is accepted,
+    // needs no user field, and ticks every few seconds with every coin's mark
+    // price, which for a perps dashboard is the "something changed" signal.
     watch(address) {
-      const n = (webData2Refs.get(address) || 0) + 1;
-      webData2Refs.set(address, n);
-      if (n === 1) subscribe({ type: 'webData2', user: address });
+      const n = (watchers.get(address) || 0) + 1;
+      watchers.set(address, n);
+      if (watchers.size === 1 && n === 1) subscribe({ type: 'allMids' });
     },
     unwatch(address) {
-      const n = (webData2Refs.get(address) || 0) - 1;
-      if (n <= 0) { webData2Refs.delete(address); unsubscribe({ type: 'webData2', user: address }); }
-      else webData2Refs.set(address, n);
+      const n = (watchers.get(address) || 0) - 1;
+      if (n <= 0) {
+        watchers.delete(address);
+        if (watchers.size === 0) unsubscribe({ type: 'allMids' });
+      } else watchers.set(address, n);
     },
     track(address) {
       if (!tracked.has(address)) { tracked.add(address); subscribe({ type: 'userFills', user: address }); }

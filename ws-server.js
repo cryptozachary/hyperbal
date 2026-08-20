@@ -13,11 +13,18 @@ export function attachWsHub(httpServer, { db, stream }) {
     }
   }
 
-  // A main-dex webData2 change can't carry builder-dex state, so nudge clients to
-  // re-fetch the aggregated account over REST (the single source of truth).
-  stream.on('account', ({ address }) => {
-    if (!address) return;
-    broadcast(address, { type: 'refresh', address });
+  // allMids carries no user, so one tick means "prices moved" and every watched
+  // wallet is potentially stale. Throttled: the feed ticks every few seconds and
+  // each refresh costs the client a full account re-fetch across every perp dex.
+  let lastRefreshAt = 0;
+  const REFRESH_MIN_INTERVAL_MS = 10000;
+  stream.on('mids', () => {
+    const now = Date.now();
+    if (now - lastRefreshAt < REFRESH_MIN_INTERVAL_MS) return;
+    lastRefreshAt = now;
+    for (const [client, address] of watching) {
+      if (client.readyState === client.OPEN) client.send(JSON.stringify({ type: 'refresh', address }));
+    }
   });
 
   // Persist + relay live fills. Rows ride along on this message so one upstream
@@ -45,7 +52,7 @@ export function attachWsHub(httpServer, { db, stream }) {
         // Only re-arm the persistent userFills sub for wallets still on the watch
         // list — otherwise a stale tab reconnecting would undo a delete's untrack.
         if (db.hasWallet(address)) stream.track(address);
-        stream.watch(address);  // live webData2
+        stream.watch(address);  // ref-counts the global allMids price feed
       }
     });
     client.on('close', () => {

@@ -26,6 +26,9 @@ export const config = {
   alertEmailTo: clean(process.env.ALERT_EMAIL_TO),
   alertCooldownMs: Number(clean(process.env.ALERT_COOLDOWN_MS)) || 900000,
   alertPollIntervalMs: Number(clean(process.env.ALERT_POLL_INTERVAL_MS)) || 300000,
-  alertDebounceMs: Number(clean(process.env.ALERT_DEBOUNCE_MS)) || 5000,
+  // Debounces the allMids price-feed trigger. That feed ticks every few seconds
+  // and each evaluation costs a full multi-dex account re-fetch, so this bounds
+  // the cost to roughly four evaluations per minute per wallet.
+  alertDebounceMs: Number(clean(process.env.ALERT_DEBOUNCE_MS)) || 15000,
   dashboardUrl: clean(process.env.DASHBOARD_URL) || `http://localhost:${port}`,
 };

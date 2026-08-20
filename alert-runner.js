@@ -46,7 +46,7 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
   const timers = new Map();   // address -> pending debounce timer
   const watched = new Set();  // addresses we hold a stream.watch reference for
   let pollTimer = null;
-  let onAccount = null;
+  let onMids = null;
 
   // stream.watch/unwatch are ref-counted upstream, so calling watch twice for the
   // same address would leave a reference no unwatch ever balances. One rule or ten
@@ -77,9 +77,9 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
 
     let payload;
     try {
-      // webData2 carries main-dex state only, so the stream is a trigger and this
-      // is the source: the same aggregated payload the dashboard renders, which is
-      // the number the user was looking at when they set the threshold.
+      // The price feed only says "something moved", so the stream is a trigger and
+      // this is the source: the same aggregated payload the dashboard renders, which
+      // is the number the user was looking at when they set the threshold.
       payload = await assemble(address, db, opts);
     } catch (err) {
       // Hyperliquid unreachable. Log and return — this must never kill the
@@ -155,14 +155,17 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
     watch: ensureWatched,
 
     start() {
-      // A persistent webData2 subscription per alerting wallet is what makes alerts
+      // A held reference on the price feed per alerting wallet is what makes alerts
       // fire with no browser open — the same thing stream.track() already does for
       // fills. Ref-counting means a browser watching the same wallet composes with
       // this reference rather than cancelling it.
       for (const address of db.alertAddresses()) ensureWatched(address);
 
-      onAccount = ({ address }) => { if (address) schedule(address); };
-      stream?.on('account', onAccount);
+      // allMids is global — it carries no user — so one tick means "prices moved",
+      // and every alerting wallet needs re-checking. schedule() debounces per
+      // address, so a burst of ticks still costs one evaluation each.
+      onMids = () => { for (const address of db.alertAddresses()) schedule(address); };
+      stream?.on('mids', onMids);
 
       // Backstop: the stream can stall without closing, and an alert that silently
       // stops working is worse than one that never existed.
@@ -177,8 +180,8 @@ export function createAlertRunner({ db, stream, notifier, opts = {}, now = Date.
       timers.clear();
       clearInterval(pollTimer);
       pollTimer = null;
-      if (onAccount) stream?.off('account', onAccount);
-      onAccount = null;
+      if (onMids) stream?.off('mids', onMids);
+      onMids = null;
       // Release every reference start() took, so a stop/start pair doesn't leave
       // the upstream subscription ref-count permanently inflated.
       for (const address of watched) stream?.unwatch(address);
