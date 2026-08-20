@@ -7,6 +7,7 @@ import { backfillWallet } from './backfill.js';
 import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
 import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, isValidTimeZone, DETAILED_COLUMNS, KOINLY_COLUMNS } from './export.js';
+import { METRICS, SCOPES, OPERATORS, isValidMetric } from './alerts.js';
 
 // Query params are untrusted strings (or arrays, for repeated params). Coerce to a
 // finite integer, falling back to `dflt` for anything that isn't one.
@@ -19,11 +20,46 @@ function toSafeInt(v, dflt) {
 const MAX_EPOCH_MS = 8.64e15;
 const clampEpoch = (n) => Math.min(MAX_EPOCH_MS, Math.max(-MAX_EPOCH_MS, n));
 
+// Validates an incoming alert rule. Returns { rule } or { error }; every rejection
+// names the offending field, matching how the export and wallet routes explain
+// themselves.
+function validateAlert(body) {
+  const address = String(body?.address || '').toLowerCase();
+  if (!isValidAddress(address)) return { error: 'Invalid wallet address. Expected 0x followed by 40 hex characters.' };
+
+  const scope = String(body?.scope || '');
+  if (!SCOPES.includes(scope)) return { error: `Unknown scope "${scope}". Expected "account" or "position".` };
+
+  const metric = String(body?.metric || '');
+  if (!isValidMetric(scope, metric)) return { error: `Metric "${metric}" is not available for scope "${scope}".` };
+
+  const operator = String(body?.operator || '');
+  if (!OPERATORS.includes(operator)) return { error: `Unknown operator "${operator}". Expected "above" or "below".` };
+
+  // Number('') is 0, so an empty threshold would otherwise sail through as a
+  // legitimate zero — a rule the user never meant to write.
+  const raw = body?.threshold;
+  const threshold = raw === '' || raw == null ? NaN : Number(raw);
+  if (!Number.isFinite(threshold)) return { error: 'Threshold must be a finite number.' };
+
+  const coin = scope === 'position' ? String(body?.coin || '').trim() : null;
+  if (scope === 'position' && !coin) return { error: 'A position alert requires a coin.' };
+
+  return { rule: { address, scope, coin, metric, operator, threshold } };
+}
+
 export function createApp(db, overrides = {}) {
   const app = express();
   app.use(express.json());
 
-  const { stream = null, ...rest } = overrides;
+  // A default no-op notifier keeps every existing test — and a server started
+  // without alerts wired — working unchanged.
+  const {
+    stream = null,
+    runner = null,
+    notifier = { configured: false, send: async () => ({ sent: false, reason: 'not-configured' }) },
+    ...rest
+  } = overrides;
   const opts = { apiUrl: config.hlApiUrl, snapshotMinIntervalMs: config.snapshotMinIntervalMs, ...rest };
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: Date.now() }));
@@ -173,6 +209,70 @@ export function createApp(db, overrides = {}) {
       res.json({ address, agents });
     } catch (err) {
       res.status(502).json({ error: `Failed to load connected agents: ${err.message}` });
+    }
+  });
+
+  app.get('/api/alerts', (req, res) => {
+    const address = String(req.query.address || '').toLowerCase();
+    // Required, deliberately: without it this would list every wallet's rules.
+    if (!isValidAddress(address)) return res.status(400).json({ error: 'Invalid wallet address.' });
+    // METRICS rides along so the UI builds its dropdowns from the same whitelist
+    // the validator enforces, rather than a hand-copied duplicate that can drift.
+    res.json({ address, alerts: db.listAlerts(address), metrics: METRICS, emailConfigured: notifier.configured });
+  });
+
+  app.post('/api/alerts', (req, res) => {
+    const { error, rule } = validateAlert(req.body);
+    if (error) return res.status(400).json({ error });
+    // Alerts are evaluated per watched wallet, so a rule on an unwatched address
+    // would never fire — refuse it rather than store something inert.
+    if (!db.hasWallet(rule.address)) {
+      return res.status(400).json({ error: 'Add the wallet to the watch list before creating alerts for it.' });
+    }
+    const alert = db.createAlert(rule);
+    // A brand new alerting wallet needs its webData2 subscription now, not at the
+    // next restart.
+    runner?.watch(rule.address);
+    res.json({ alert });
+  });
+
+  app.patch('/api/alerts/:id', (req, res) => {
+    const id = toSafeInt(req.params.id, NaN);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid alert id.' });
+
+    const body = req.body || {};
+    const patch = {};
+    if ('enabled' in body) patch.enabled = body.enabled ? 1 : 0;
+    if ('threshold' in body) {
+      const threshold = body.threshold === '' || body.threshold == null ? NaN : Number(body.threshold);
+      if (!Number.isFinite(threshold)) return res.status(400).json({ error: 'Threshold must be a finite number.' });
+      patch.threshold = threshold;
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update. Send "enabled" or "threshold".' });
+
+    const alert = db.updateAlert(id, patch);
+    if (!alert) return res.status(404).json({ error: 'No such alert.' });
+    res.json({ alert });
+  });
+
+  app.delete('/api/alerts/:id', (req, res) => {
+    const id = toSafeInt(req.params.id, NaN);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid alert id.' });
+    if (!db.deleteAlert(id)) return res.status(404).json({ error: 'No such alert.' });
+    res.json({ ok: true });
+  });
+
+  app.post('/api/alerts/test', async (req, res) => {
+    // 503 rather than a cheerful 200: a test button that succeeds without sending
+    // anything is worse than no button.
+    if (!notifier.configured) {
+      return res.status(503).json({ error: 'Email is not configured. Set SMTP_HOST and ALERT_EMAIL_TO in .env.' });
+    }
+    try {
+      await notifier.send({ subject: '[Hyperbal] Test alert', text: 'Email is configured correctly.' });
+      res.json({ sent: true });
+    } catch (err) {
+      res.status(502).json({ error: `Failed to send: ${err.message}` });
     }
   });
 

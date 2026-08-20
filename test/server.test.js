@@ -36,6 +36,32 @@ function fakeDb(fills = []) {
       if (!fills.length) return { minTs: null, maxTs: null };
       return { minTs: Math.min(...fills.map((f) => f.ts)), maxTs: Math.max(...fills.map((f) => f.ts)) };
     },
+    // --- alerts ---
+    alerts: [],
+    createAlert(rule) {
+      const row = { id: this.alerts.length + 1, enabled: 1, last_state: null,
+        last_attempt_at: null, last_fired_at: null, created_at: 1, ...rule };
+      this.alerts.push(row);
+      return row;
+    },
+    listAlerts(address) { return this.alerts.filter((a) => a.address === address); },
+    listEnabledAlerts(address) { return this.alerts.filter((a) => a.address === address && a.enabled); },
+    alertAddresses() { return [...new Set(this.alerts.filter((a) => a.enabled).map((a) => a.address))]; },
+    updateAlert(id, patch) {
+      const row = this.alerts.find((a) => a.id === id);
+      if (!row) return null;
+      if (patch.enabled != null) row.enabled = patch.enabled ? 1 : 0;
+      if (patch.threshold != null) row.threshold = Number(patch.threshold);
+      row.last_state = null;
+      return row;
+    },
+    deleteAlert(id) {
+      const i = this.alerts.findIndex((a) => a.id === id);
+      if (i < 0) return false;
+      this.alerts.splice(i, 1);
+      return true;
+    },
+    saveAlertResult() {},
   };
 }
 
@@ -408,4 +434,141 @@ test('backfill resolves an absent builderFee to 0, not to unknown', async () => 
     assert.equal(row.builder_fee, 0, 'an authoritative absence is 0, so it exports as 0 rather than blank');
     assert.equal(json.fills.enriched, 1, 'and the row counts as fully repaired');
   } finally { server.close(); }
+});
+
+// --- alerts ---
+
+const ADDR = '0x' + '3'.repeat(40);
+
+// POST /api/wallets requires a live userRole lookup; this stub answers it so the
+// alert tests can get a wallet onto the watch list.
+const roleFetch = async () => ({ ok: true, json: async () => ({ role: 'user' }) });
+
+async function withWallet(fn, overrides = {}) {
+  await withServer({ fetchImpl: roleFetch, ...overrides }, async (base) => {
+    await fetch(`${base}/api/wallets`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: ADDR }),
+    });
+    return fn(base);
+  });
+}
+
+const postAlert = (base, body) => fetch(`${base}/api/alerts`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+});
+
+const VALID = { address: ADDR, scope: 'account', metric: 'equity', operator: 'below', threshold: 5000 };
+
+test('GET /api/alerts requires a valid address', async () => {
+  await withServer({}, async (base) => {
+    assert.equal((await fetch(`${base}/api/alerts`)).status, 400);
+    assert.equal((await fetch(`${base}/api/alerts?address=nope`)).status, 400);
+  });
+});
+
+test('GET /api/alerts returns rules, the whitelist, and mail status', async () => {
+  await withWallet(async (base) => {
+    await postAlert(base, VALID);
+    const res = await fetch(`${base}/api/alerts?address=${ADDR}`);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.alerts.length, 1);
+    assert.equal(json.alerts[0].metric, 'equity');
+    // The UI builds its dropdowns from this, so it cannot drift from the server.
+    assert.ok(json.metrics.account.equity);
+    assert.ok(json.metrics.position.markPrice);
+    assert.equal(json.emailConfigured, false);
+  });
+});
+
+test('POST /api/alerts creates a rule', async () => {
+  await withWallet(async (base) => {
+    const res = await postAlert(base, VALID);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.alert.scope, 'account');
+    assert.equal(json.alert.threshold, 5000);
+    assert.equal(json.alert.coin, null);
+  });
+});
+
+test('POST /api/alerts creates a position rule with its coin', async () => {
+  await withWallet(async (base) => {
+    const res = await postAlert(base, { ...VALID, scope: 'position', coin: 'BTC', metric: 'liquidationDistancePct', threshold: 5 });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).alert.coin, 'BTC');
+  });
+});
+
+test('POST /api/alerts rejects every malformed shape', async () => {
+  await withWallet(async (base) => {
+    const bad = [
+      { ...VALID, address: 'nope' },
+      { ...VALID, scope: 'galaxy' },
+      { ...VALID, metric: 'nonsense' },
+      { ...VALID, metric: 'markPrice' },                          // position metric, account scope
+      { ...VALID, scope: 'position', metric: 'markPrice' },       // position scope, no coin
+      { ...VALID, operator: 'equals' },
+      { ...VALID, threshold: 'abc' },
+      { ...VALID, threshold: Infinity },
+    ];
+    for (const body of bad) {
+      const res = await postAlert(base, body);
+      assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
+      assert.ok((await res.json()).error);
+    }
+  });
+});
+
+test('POST /api/alerts refuses a wallet that is not on the watch list', async () => {
+  await withServer({}, async (base) => {
+    const res = await postAlert(base, VALID);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /watch list/);
+  });
+});
+
+test('PATCH /api/alerts/:id updates and validates', async () => {
+  await withWallet(async (base) => {
+    const { alert } = await (await postAlert(base, VALID)).json();
+    const patch = (body) => fetch(`${base}/api/alerts/${alert.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+    assert.equal((await (await patch({ threshold: 7000 })).json()).alert.threshold, 7000);
+    assert.equal((await (await patch({ enabled: false })).json()).alert.enabled, 0);
+    assert.equal((await patch({})).status, 400);              // nothing to update
+    assert.equal((await patch({ threshold: 'abc' })).status, 400);
+
+    const missing = await fetch(`${base}/api/alerts/9999`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ threshold: 1 }),
+    });
+    assert.equal(missing.status, 404);
+  });
+});
+
+test('DELETE /api/alerts/:id removes a rule', async () => {
+  await withWallet(async (base) => {
+    const { alert } = await (await postAlert(base, VALID)).json();
+    assert.equal((await fetch(`${base}/api/alerts/${alert.id}`, { method: 'DELETE' })).status, 200);
+    assert.equal((await fetch(`${base}/api/alerts/${alert.id}`, { method: 'DELETE' })).status, 404);
+  });
+});
+
+test('POST /api/alerts/test reports unconfigured mail rather than pretending', async () => {
+  await withServer({}, async (base) => {
+    const res = await fetch(`${base}/api/alerts/test`, { method: 'POST' });
+    assert.equal(res.status, 503);
+    assert.match((await res.json()).error, /not configured/i);
+  });
+});
+
+test('POST /api/alerts/test sends through a configured notifier', async () => {
+  const sent = [];
+  const notifier = { configured: true, send: async (m) => { sent.push(m); return { sent: true }; } };
+  await withServer({ notifier }, async (base) => {
+    const res = await fetch(`${base}/api/alerts/test`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    assert.equal(sent.length, 1);
+  });
 });
