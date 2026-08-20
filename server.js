@@ -8,6 +8,8 @@ import { createStream } from './hl-stream.js';
 import { attachWsHub } from './ws-server.js';
 import { toCsv, buildPreamble, buildDetailedRows, buildKoinlyRows, isValidTimeZone, DETAILED_COLUMNS, KOINLY_COLUMNS } from './export.js';
 import { METRICS, SCOPES, OPERATORS, isValidMetric } from './alerts.js';
+import { createNotifier } from './notifier.js';
+import { createAlertRunner } from './alert-runner.js';
 
 // Query params are untrusted strings (or arrays, for repeated params). Coerce to a
 // finite integer, falling back to `dflt` for anything that isn't one.
@@ -198,6 +200,9 @@ export function createApp(db, overrides = {}) {
     db.deleteWallet(address);
     // Without this the live userFills subscription re-inserts the fills we just purged.
     stream?.untrack(address);
+    // The alerts cascade away with the wallet, so the runner's webData2 reference
+    // for it is now paying for data nothing reads.
+    runner?.unwatch(address);
     res.json({ wallets: db.listWallets() });
   });
 
@@ -283,12 +288,33 @@ export function createApp(db, overrides = {}) {
 if (process.argv[1]?.endsWith('server.js')) {
   const db = openDb(config.dbPath);
   const stream = createStream({ wsUrl: config.hlWsUrl });
-  const app = createApp(db, { stream });
+  const notifier = createNotifier(config);
+  const runner = createAlertRunner({
+    db,
+    stream,
+    notifier,
+    opts: {
+      apiUrl: config.hlApiUrl,
+      snapshotMinIntervalMs: config.snapshotMinIntervalMs,
+      alertCooldownMs: config.alertCooldownMs,
+      alertDebounceMs: config.alertDebounceMs,
+      alertPollIntervalMs: config.alertPollIntervalMs,
+      dashboardUrl: config.dashboardUrl,
+    },
+  });
+  const app = createApp(db, { stream, notifier, runner });
   const server = app.listen(config.port, () => console.log(`Dashboard on http://localhost:${config.port}`));
 
   stream.start();
   // Re-track all previously-watched wallets so fills accumulate even before a browser connects.
   for (const w of db.listWallets()) stream.track(w.address);
+  // Same idea for account state: one webData2 subscription per alerting wallet, so
+  // alerts fire with no browser open.
+  runner.start();
+
+  if (!notifier.configured) {
+    console.log('[alerts] SMTP is not configured — alerts will evaluate and log, but not email.');
+  }
 
   attachWsHub(server, { db, stream });
 }
