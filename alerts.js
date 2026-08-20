@@ -119,8 +119,10 @@ export function formatValue(v, unit) {
   return String(v);
 }
 
-// One phrasing of a rule, shared by the email subject and the UI list so the two
-// cannot drift into describing the same rule differently.
+// One phrasing of a rule, for the email subject. public/js/alerts.js keeps a
+// deliberate hand copy so the panel can render a row without a second round trip;
+// the two are small and must be changed together — this is not enforced anywhere,
+// which is exactly why it is written down here.
 export function describeRule(rule) {
   const meta = METRICS[rule.scope]?.[rule.metric];
   const name = meta ? meta.label : rule.metric;

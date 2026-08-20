@@ -11,9 +11,10 @@ let rows = [];
 let emailConfigured = false;
 let loadSeq = 0;          // generation guard — same mySeq/want pattern as fills.js
 
-// Mirrors alerts.js describeRule() on the server. Duplicated deliberately and
-// kept small: sending the phrasing over the wire per row would mean the list
-// couldn't render until a second request landed.
+// Mirrors describeRule()/formatValue() in alerts.js on the server — a deliberate
+// hand copy so a row renders without a second round trip. Keep the two in step;
+// the locale difference is intentional (the server pins en-US for email, the
+// browser follows the viewer), the number formatting is not.
 function describe(a) {
   const meta = metrics?.[a.scope]?.[a.metric];
   const name = meta ? meta.label : a.metric;
@@ -24,7 +25,7 @@ function describe(a) {
 function formatThreshold(v, unit) {
   if (v == null || !Number.isFinite(v)) return '—';
   if (unit === 'usd') return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (unit === 'pct') return `${v}%`;
+  if (unit === 'pct') return `${v.toFixed(2)}%`;
   if (unit === 'x') return `${v}×`;
   return String(v);
 }
