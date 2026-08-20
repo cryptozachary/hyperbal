@@ -82,10 +82,14 @@ async function selectAddress(address) {
   wallets.setCurrent(address);
   chartPanel.setAddress(address);
   alertsPanel.setAddress(address);
+  // Before refresh(), not after: this is a local DB read (~1ms), while everything
+  // below is a chain of Hyperliquid round trips. Loading it last left the alerts
+  // panel — and its test-email button — in its not-yet-known state for seconds
+  // after every wallet switch.
+  await alertsPanel.load();
   await refresh(true);
   await wallets.renderAgents(address);
   await exportsPanel.loadPeriods();   // same position as before, ordering preserved
-  await alertsPanel.load();
   if (state.wsConnected) state.ws.send(JSON.stringify({ type: 'watch', address }));
 }
 

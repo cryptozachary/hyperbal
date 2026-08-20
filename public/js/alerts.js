@@ -8,7 +8,11 @@ let address = null;
 let metrics = null;       // the server's whitelist; the dropdowns are built from it
 let positions = [];       // current open positions, for the coin dropdown
 let rows = [];
-let emailConfigured = false;
+// Tri-state, deliberately: null means "the server hasn't told us yet", which is
+// the panel's state for the whole first load. A boolean defaulted to false made
+// that indistinguishable from a confirmed "not configured", so the panel disabled
+// the test button and asserted a reason it had not yet checked.
+let emailConfigured = null;
 let loadSeq = 0;          // generation guard — same mySeq/want pattern as fills.js
 
 // What to show beside the threshold input. roe is stored x100 and
@@ -44,6 +48,16 @@ function statusText(a) {
   return a.last_state == null ? `waiting for data · ${fired}` : `armed · ${fired}`;
 }
 
+// How the mail banner and the test button should read for a given knowledge state.
+// Pure and exported so the three cases are pinned by a test rather than by reading
+// paint(). While the answer is unknown the button stays live: a click then either
+// works or returns the 503 that names the real problem, which beats a dead button
+// under a confident, wrong explanation.
+export function mailState(configured) {
+  if (configured == null) return { disabled: false, warn: false };
+  return { disabled: !configured, warn: !configured };
+}
+
 function paint() {
   const list = $('alertList');
   list.innerHTML = '';
@@ -62,10 +76,11 @@ function paint() {
     list.appendChild(row);
   }
 
+  const { disabled, warn: showWarn } = mailState(emailConfigured);
   const warn = $('alertEmailWarn');
-  warn.classList.toggle('hidden', emailConfigured);
+  warn.classList.toggle('hidden', !showWarn);
   warn.textContent = 'Email is not configured — alerts will be recorded but not sent. Set SMTP_HOST and ALERT_EMAIL_TO in .env.';
-  $('alertTestBtn').disabled = !emailConfigured;
+  $('alertTestBtn').disabled = disabled;
 }
 
 // Rebuild the metric dropdown for the selected scope, and show the coin dropdown
@@ -214,7 +229,7 @@ export function mount() {
     } catch (err) {
       toast("Couldn't send test email: " + errMsg(err), 'error');
     } finally {
-      btn.disabled = !emailConfigured;
+      btn.disabled = mailState(emailConfigured).disabled;
     }
   });
 }
